@@ -12,11 +12,11 @@ REM INCLUDES
 set SDL_Include=/I"..\arwin\external\SDL3-3.4.2\include"
 set SDLIMAGE_Include=/I"..\arwin\external\SDL3_image-3.4.0\include"
 set SDLTTF_Include=/I"..\arwin\external\SDL3_ttf-3.2.2\include"
-set FMT_Include=/I"..\arwin\external\fmt-12.1.0\include"
+REM set FMT_Include=/I"..\arwin\external\fmt-12.1.0\include" // can just use std::format in c++20
 
 set VULKAN_INCLUDE=/I"..\arwin\code"
 
-set CommonCompilerFlags=/utf-8 /std:c++20 -MT -nologo -fp:fast -Gm- -GR- -EHa- -Od -Oi -WX -W4 -wd4201 -wd4100 -wd4189 -wd4244 -wd4996 -wd4456 -FC -Z7 %SDL_Include% %SDLIMAGE_Include% %SDLTTF_Include% %VULKAN_INCLUDE% %FMT_Include%
+set CommonCompilerFlags=/utf-8 /std:c++20 -MT -nologo -fp:fast -Gm- -GR- -EHa- -Od -Oi -WX -W4 -wd4201 -wd4100 -wd4189 -wd4244 -wd4996 -wd4456 -FC -Z7 %SDL_Include% %SDLIMAGE_Include% %SDLTTF_Include% %VULKAN_INCLUDE%
 
 set CommonLinkerFlags=-incremental:no -opt:ref /DEBUG /PDB:main.pdb %SDL_LIB% %SDLIMAGE_LIB% %SDLTTF_LIB%
 
