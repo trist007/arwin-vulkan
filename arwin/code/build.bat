@@ -30,11 +30,12 @@ REM for debug /DDEBUG enabled the DEBUG define
 REM -MT can't use -MT which statically links to the CRT but Vulkan Validation layer has a conflict and uses a different
 REM CRT so need to use /MD to dynamically link 
 REM had to remove -EHa- /EHsc enabled exception handling but -EHa- disables it
+REM -WX is warnings as errors to be safe, if warning is ok I will suppress it with -wd<warning_no>
 set CommonCompilerFlags=/utf-8 /std:c++20 /EHsc ^
     /MD -nologo -fp:fast -Gm- -Od -Oi -WX -W4 ^
     /Zc:threadSafeInit- ^
     /D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR ^
-    -wd4202 -wd4100 -wd4189 -wd4244 -wd4996 -wd4456 -FC -Z7 ^
+    -wd4202 -wd4100 -wd4189 -wd4244 -wd4996 -wd4456 -wd4324 -FC -Z7 ^
     %SDL_Include% %SDLIMAGE_Include% %SDLTTF_Include% %VULKAN_INCLUDE%
 
 set CommonLinkerFlags=-incremental:no -opt:ref /DEBUG /PDB:main.pdb %SDL_LIB% %SDLIMAGE_LIB% %SDLTTF_LIB% %VULKAN_LIB%

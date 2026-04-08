@@ -1,0 +1,5 @@
+for text rendering in SDL3
+TTF_Font → SDL_Surface → SDL_Texture → SDL_GPU renders it
+
+for text rendering in Vulkan
+TTF_Font → SDL_Surface → VkImage → your pipeline renders it

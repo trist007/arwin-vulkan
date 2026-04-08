@@ -6,6 +6,9 @@
 // bootstrap library
 #include "VKBootstrap.h"
 
+#define VMA_IMPLEMENTATION
+#include "vk_mem_alloc.h"
+
 constexpr bool bUseValidationLayers = true;
 
 static VulkanEngine *s_engine = 0;
@@ -105,12 +108,68 @@ init_vulkan(VulkanEngine *engine)
     // use VkBootstrap to get a Graphics queue
     engine->graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
     engine->graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+
+    // initialize the memory allocator
+    VmaAllocatorCreateInfo allocatorInfo = {};
+    allocatorInfo.physicalDevice = engine->chosenGPU;
+    allocatorInfo.device = engine->device;
+    allocatorInfo.instance = engine->instance;
+    allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    vmaCreateAllocator(&allocatorInfo, &engine->allocator);
+
+    // ! NOTE: trist007: [&]() is the lambda [&] is capture by reference which for a deletion queue
+    // ! can be dangerous if the variable goes out of scope before flush() is called [=] capture by 
+    // ! value is safter because it copies the handle by value at push time
+    engine->mainDeletionQueue.push_function([&]()
+    {
+        vmaDestroyAllocator(engine->allocator);
+    });
 }
 
 void
 init_swapchain(VulkanEngine *engine)
 {
     create_swapchain(engine, engine->windowExtent.width, engine->windowExtent.height);
+
+    VkExtent3D drawImageExtent = {
+        engine->windowExtent.width,
+        engine->windowExtent.height,
+        1
+    };
+
+    engine->drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+    engine->drawImage.imageExtent = drawImageExtent;
+
+    VkImageUsageFlags drawImageUsages = 0;
+    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    VkImageCreateInfo rimg_info = vkinit::image_create_info(
+        engine->drawImage.imageFormat, drawImageUsages, drawImageExtent);
+
+    VmaAllocationCreateInfo rimg_allocinfo = {};
+    // ! NOTE: trist007: In vulkan, there are multiple memory regions we can allocate images and buffers from.
+    // ! PC implementations with dedicated GPUs will generally have a cpu ram region, a GPU Vram region, and a “upload heap”
+    // ! which is a special region of gpu vram that allows cpu writes. If you have resizable bar enabled, the upload heap can
+    // ! be the entire gpu vram. Else it will be much smaller, generally only 256 megabytes. We tell VMA to put it on GPU_ONLY
+    // ! which will prioritize it to be on the gpu vram but outside of that upload heap region.
+    rimg_allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    rimg_allocinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vmaCreateImage(engine->allocator, &rimg_info, &rimg_allocinfo,
+        &engine->drawImage.image, &engine->drawImage.allocation, nullptr);
+
+    VkImageViewCreateInfo rview_info = vkinit::imageview_create_info(
+        engine->drawImage.imageFormat, engine->drawImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    VK_CHECK(vkCreateImageView(engine->device, &rview_info, nullptr, &engine->drawImage.imageView));
+
+    engine->mainDeletionQueue.push_function([=]() {
+        vkDestroyImageView(engine->device, engine->drawImage.imageView, nullptr);
+        vmaDestroyImage(engine->allocator, engine->drawImage.image, engine->drawImage.allocation);
+    });
 }
 
 void
@@ -221,8 +280,13 @@ cleanupVulkanEngine(VulkanEngine *engine)
             // destroy sync objects
             vkDestroyFence(engine->device, engine->frames[i].renderFence, nullptr);
 		    vkDestroySemaphore(engine->device, engine->frames[i].renderSemaphore, nullptr);
-		    vkDestroySemaphore(engine->device , engine->frames[i].swapchainSemaphore, nullptr);
+            vkDestroySemaphore(engine->device , engine->frames[i].swapchainSemaphore, nullptr);
+
+            engine->frames[i].deletionQueue.flush();
         }
+        
+        // flush the global deltion queue
+        engine->mainDeletionQueue.flush();
 
         destroy_swapchain(engine);
 
@@ -249,6 +313,8 @@ drawVulkanEngine(VulkanEngine *engine)
     // ! The timeout of the WaitFences call is of 1 second. It’s using nanoseconds for the wait time. If you call the function with 0 as
     // ! the timeout, you can use it to know if the GPU is still executing the command or not.
     VK_CHECK(vkWaitForFences(engine->device, 1, &frame->renderFence, true, 1000000000));
+    frame->deletionQueue.flush();
+
     VK_CHECK(vkResetFences(engine->device, 1, &frame->renderFence));
 
     // request image from the swapchain
@@ -268,6 +334,7 @@ drawVulkanEngine(VulkanEngine *engine)
     // ! is reset, so this is perfectly good for us.
     VkCommandBufferBeginInfo cmdBeginInfo = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT); 
 
+    /* Old impl
     // start the command buffer recording
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
@@ -285,6 +352,25 @@ drawVulkanEngine(VulkanEngine *engine)
 
     // transition to presentable
     vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+    VK_CHECK(vkEndCommandBuffer(cmd));
+    */
+
+    engine->drawExtent.width = engine->drawImage.imageExtent.width;
+    engine->drawExtent.height = engine->drawImage.imageExtent.height;
+
+    VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
+
+    vkutil::transition_image(cmd, engine->drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+    draw_background(engine, cmd);
+
+    vkutil::transition_image(cmd, engine->drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    vkutil::copy_image_to_image(cmd, engine->drawImage.image, engine->swapchainImages[swapchainImageIndex], engine->drawExtent, engine->swapchainExtent);
+
+    vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
@@ -367,3 +453,16 @@ getCurrentFrame(VulkanEngine *engine)
     return &engine->frames[engine->frameNumber % FRAME_OVERLAP];
 }
 
+void
+draw_background(VulkanEngine *engine, VkCommandBuffer cmd)
+{
+    // make a clear color from frame number, this will flash with a 120 frame period
+    VkClearColorValue clearValue;
+    float flash = std::abs(std::sin(engine->frameNumber / 120.0f));
+    clearValue = { { 0.0f, 0.0f, flash, 1.0f } };
+
+    VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+
+    // clear image
+    vkCmdClearColorImage(cmd, engine->drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+}
