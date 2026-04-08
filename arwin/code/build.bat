@@ -7,6 +7,7 @@ REM LIBRARIES
 set SDL_LIB=..\arwin\external\SDL3-3.4.2\lib\x64\SDL3.lib
 set SDLIMAGE_LIB=..\arwin\external\SDL3_image-3.4.0\lib\x64\SDL3_image.lib
 set SDLTTF_LIB=..\arwin\external\SDL3_ttf-3.2.2\lib\x64\SDL3_ttf.lib
+set VULKAN_LIB=..\arwin\code\vulkan-1.lib
 
 REM INCLUDES
 set SDL_Include=/I"..\arwin\external\SDL3-3.4.2\include"
@@ -16,9 +17,14 @@ REM set FMT_Include=/I"..\arwin\external\fmt-12.1.0\include" // can just use std
 
 set VULKAN_INCLUDE=/I"..\arwin\code"
 
-set CommonCompilerFlags=/utf-8 /std:c++20 -MT -nologo -fp:fast -Gm- -GR- -EHa- -Od -Oi -WX -W4 -wd4201 -wd4100 -wd4189 -wd4244 -wd4996 -wd4456 -FC -Z7 %SDL_Include% %SDLIMAGE_Include% %SDLTTF_Include% %VULKAN_INCLUDE%
+REM for debug /DDEBUG enabled the DEBUG define
 
-set CommonLinkerFlags=-incremental:no -opt:ref /DEBUG /PDB:main.pdb %SDL_LIB% %SDLIMAGE_LIB% %SDLTTF_LIB%
+set CommonCompilerFlags=/utf-8 /std:c++20 /EHsc ^
+    -MT -nologo -fp:fast -Gm- -GR- -EHa- -Od -Oi -WX -W4 ^
+    -wd4201 -wd4100 -wd4189 -wd4244 -wd4996 -wd4456 -FC -Z7 ^
+    %SDL_Include% %SDLIMAGE_Include% %SDLTTF_Include% %VULKAN_INCLUDE%
+
+set CommonLinkerFlags=-incremental:no -opt:ref /DEBUG /PDB:main.pdb %SDL_LIB% %SDLIMAGE_LIB% %SDLTTF_LIB% %VULKAN_LIB%
 
 REM echo Updating etags
 REM echo,
@@ -33,7 +39,12 @@ copy /Y ..\arwin\external\SDL3_ttf-3.2.2\lib\x64\SDL3_ttf.dll . > NUL
 REM delete pdb because debugger maintains a lock on pdb so pdb cannot be overwritten
 del *.pdb > NUL 2> NUL
 
-cl %CommonCompilerFlags% ..\arwin\code\main.cpp ..\arwin\code\vk_engine.cpp ..\arwin\code\vk_initializers.cpp /link %CommonLinkerFlags%
+cl %CommonCompilerFlags% ^
+    ..\arwin\code\main.cpp ^
+    ..\arwin\code\vk_engine.cpp ^
+    ..\arwin\code\vk_initializers.cpp ^
+    ..\arwin\code\VkBootstrap.cpp ^
+    /link %CommonLinkerFlags%
 REM/Fe:win32_arwin.exe
 
 popd

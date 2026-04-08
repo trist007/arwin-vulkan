@@ -20,6 +20,12 @@
 //#include <glm/mat4x4.hpp>
 //#include <glm/vec4.hpp>
 
+#ifdef DEBUG
+#define assert(Expression) if(!(Expression)) {*(int *)0 = 0;}
+#else
+#define assert(Expression)
+#endif
+
 #define VK_CHECK(x)                                                     \
     do {                                                                \
         VkResult err = x;                                               \
