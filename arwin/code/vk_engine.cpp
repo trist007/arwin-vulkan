@@ -67,7 +67,7 @@ init_vulkan(VulkanEngine *engine)
     engine->instance = vkb_inst.instance;
     engine->debugMessenger = vkb_inst.debug_messenger;
 
-    SDL_Vulkan_CreateSurface(engine->window, engine->instance, NULL, &engine->surface);
+    SDL_Vulkan_CreateSurface(engine->window, engine->instance, 0, &engine->surface);
 
     //vulkan 1.3 features
 	VkPhysicalDeviceVulkan13Features features{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
@@ -100,6 +100,10 @@ init_vulkan(VulkanEngine *engine)
 	// Get the VkDevice handle used in the rest of a vulkan application
 	engine->device = vkbDevice.device;
 	engine->chosenGPU = physicalDevice.physical_device;
+
+    // use VkBootstrap to get a Graphics queue
+    engine->graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
+    engine->graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
 }
 
 void
@@ -111,7 +115,30 @@ init_swapchain(VulkanEngine *engine)
 void
 init_commands(VulkanEngine *engine)
 {
-    // TODO
+    // create a command pool for commands submitted to the graphics queue
+    // we also want the pool to allow for resetting of individual command buffers
+    VkCommandPoolCreateInfo commandPoolInfo = {};
+    commandPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    commandPoolInfo.pNext = 0;
+    commandPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    commandPoolInfo.queueFamilyIndex = engine->graphicsQueueFamily;
+
+    for(int i = 0;
+    i < FRAME_OVERLAP;
+    ++i)
+    {
+        VK_CHECK(vkCreateCommandPool(engine->device, &commandPoolInfo, 0, &engine->frames[i].commandPool));
+        
+        // allocate the default command buffer that wee will use for rendering
+        VkCommandBufferAllocateInfo cmdAllocInfo = {};
+        cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        cmdAllocInfo.pNext = 0;
+        cmdAllocInfo.commandPool = engine->frames[i].commandPool;
+        cmdAllocInfo.commandBufferCount = 1;
+        cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+        VK_CHECK(vkAllocateCommandBuffers(engine->device, &cmdAllocInfo, &engine->frames[i].mainCommandBuffer));
+    }
 }
 
 void
@@ -156,12 +183,12 @@ create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height)
 void
 destroy_swapchain(VulkanEngine *engine)
 {
-    vkDestroySwapchainKHR(engine->device, engine->swapchain, NULL);    
+    vkDestroySwapchainKHR(engine->device, engine->swapchain, 0);    
 
     for(uint32_t i = 0;
         i < engine->swapchainImageCount;
         ++i)
-        vkDestroyImageView(engine->device, engine->swapchainImageViews[i], NULL);
+        vkDestroyImageView(engine->device, engine->swapchainImageViews[i], 0);
 }
 
 void
@@ -171,11 +198,11 @@ cleanupVulkanEngine(VulkanEngine *engine)
     {
         destroy_swapchain(engine);
 
-        vkDestroySurfaceKHR(engine->instance, engine->surface, NULL);
-        vkDestroyDevice(engine->device, NULL);
+        vkDestroySurfaceKHR(engine->instance, engine->surface, 0);
+        vkDestroyDevice(engine->device, 0);
 
         vkb::destroy_debug_utils_messenger(engine->instance, engine->debugMessenger);
-        vkDestroyInstance(engine->instance, NULL);
+        vkDestroyInstance(engine->instance, 0);
         SDL_DestroyWindow(engine->window);
 
         // clear engine pointer
@@ -222,5 +249,11 @@ runVulkanEngine(VulkanEngine *engine)
 
         drawVulkanEngine(engine);
     }
+}
+
+FrameData*
+getCurrentFrame(VulkanEngine *engine)
+{
+    return &engine->frames[engine->frameNumber % FRAME_OVERLAP];
 }
 

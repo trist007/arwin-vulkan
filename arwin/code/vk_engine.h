@@ -4,6 +4,14 @@
 
 #define MAX_SWAPCHAIN_IMAGES 8
 
+struct FrameData
+{
+    VkCommandPool commandPool;
+    VkCommandBuffer mainCommandBuffer;
+};
+
+constexpr unsigned int FRAME_OVERLAP = 2;
+
 struct VulkanEngine
 {
     bool isInitialized;
@@ -22,6 +30,9 @@ struct VulkanEngine
     VkImageView swapchainImageViews[MAX_SWAPCHAIN_IMAGES];
     uint32_t swapchainImageCount;
     VkExtent2D swapchainExtent;
+    FrameData frames[FRAME_OVERLAP];
+    VkQueue graphicsQueue;
+    uint32_t graphicsQueueFamily;
 };
 
 // singleton for pointer retrieval
@@ -47,4 +58,5 @@ void destroy_swapchain(VulkanEngine *engine);
 void initVulkanEngine(VulkanEngine *engine);
 void cleanupVulkanEngine(VulkanEngine *engine);
 void drawVulkanEngine(VulkanEngine *engine);
-void runVulkanEngine(VulkanEngine * engine);
+void runVulkanEngine(VulkanEngine *engine);
+FrameData *getCurrentFrame(VulkanEngine *engine);
