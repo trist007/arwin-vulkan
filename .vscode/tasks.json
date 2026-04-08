@@ -1,0 +1,27 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "${workspaceFolder}/arwin/code/build.bat",
+            "options": {
+                "cwd": "${workspaceFolder}/arwin/code"
+            },
+            "problemMatcher": ["$msCompile"],
+            "group": {
+            "kind": "build",
+            "isDefault": true
+            }
+        },
+        {
+            "label": "run",
+            "type": "shell",
+            "command": "${workspaceFolder}/arwin/code/run.bat",
+            "options": {
+                "cwd": "${workspaceFolder}/build"
+            },
+            "problemMatcher": []
+        }
+    ]
+}
