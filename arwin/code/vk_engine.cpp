@@ -1,6 +1,7 @@
 #include "vk_engine.h"
 #include <SDL3/SDL_vulkan.h>
 #include <vk_initializers.h>
+#include <vk_images.h>
 
 // bootstrap library
 #include "VKBootstrap.h"
@@ -136,7 +137,26 @@ init_commands(VulkanEngine *engine)
 void
 init_sync_structures(VulkanEngine *engine)
 {
-    // TODO
+    // create synchronization structure
+    // one fence to control when the gpu has finished rendering the frame,
+    // and 2 semaphores to synchronize rendering with swapchain, we want
+    // the fence to start signalled so we can wait on it on the first frame
+    // ! NOTE: trist007: On the fence, we are using the flag VK_FENCE_CREATE_SIGNALED_BIT.
+    // ! This is very important, as it allows us to wait on a freshly created fence without causing errors.
+    // ! If we did not have that bit, when we call into WaitFences the first frame, before the gpu is doing work,
+    // ! the thread will be blocked.
+    VkFenceCreateInfo fenceCreateInfo = vkinit::fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
+    VkSemaphoreCreateInfo semaphoreCreateInfo = vkinit::semaphore_create_info();
+
+    for(int i = 0;
+    i < FRAME_OVERLAP;
+    ++i)
+    {
+        VK_CHECK(vkCreateFence(engine->device, &fenceCreateInfo, 0, &engine->frames[i].renderFence));
+
+        VK_CHECK(vkCreateSemaphore(engine->device, &semaphoreCreateInfo, 0, &engine->frames[i].swapchainSemaphore));
+        VK_CHECK(vkCreateSemaphore(engine->device, &semaphoreCreateInfo, 0, &engine->frames[i].renderSemaphore));
+    }
 }
 
 void
@@ -194,7 +214,15 @@ cleanupVulkanEngine(VulkanEngine *engine)
         for(int i = 0;
         i < FRAME_OVERLAP;
         ++i)
+        {
+            // cannot destroy VkQueue just like VkPhysicalDevice
             vkDestroyCommandPool(engine->device, engine->frames[i].commandPool, 0);
+
+            // destroy sync objects
+            vkDestroyFence(engine->device, engine->frames[i].renderFence, nullptr);
+		    vkDestroySemaphore(engine->device, engine->frames[i].renderSemaphore, nullptr);
+		    vkDestroySemaphore(engine->device , engine->frames[i].swapchainSemaphore, nullptr);
+        }
 
         destroy_swapchain(engine);
 
@@ -213,7 +241,89 @@ cleanupVulkanEngine(VulkanEngine *engine)
 void
 drawVulkanEngine(VulkanEngine *engine)
 {
-    // nothing yet
+    FrameData *frame = getCurrentFrame(engine);
+
+    // wait until the gpu has finished rendering the last frame.  Timeout of 1 second
+    // ! NOTE: trist007: We use vkWaitForFences() to wait for the GPU to have finished its work, and after it we reset the fence.
+    // ! Fences have to be reset between uses, you can’t use the same fence on multiple GPU commands without resetting it in the middle.
+    // ! The timeout of the WaitFences call is of 1 second. It’s using nanoseconds for the wait time. If you call the function with 0 as
+    // ! the timeout, you can use it to know if the GPU is still executing the command or not.
+    VK_CHECK(vkWaitForFences(engine->device, 1, &frame->renderFence, true, 1000000000));
+    VK_CHECK(vkResetFences(engine->device, 1, &frame->renderFence));
+
+    // request image from the swapchain
+    uint32_t swapchainImageIndex;
+    VK_CHECK(vkAcquireNextImageKHR(engine->device, engine->swapchain, 1000000000, frame->swapchainSemaphore, 0, &swapchainImageIndex));
+
+    // naming it cmd for shorter writing
+    VkCommandBuffer cmd = frame->mainCommandBuffer;
+
+    // now that we are sure that the commands finished executing, we can safely reset the command buffer to begin recording again
+    VK_CHECK(vkResetCommandBuffer(cmd, 0));
+
+    // begin the command buffer recording, we will use this command buffer exactly once, so we want to let vulkan know that
+    // ! NOTE: trist007: we will give it the flag VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT This is optional, but we might get a
+    // ! small speedup from our command encoding if we can tell the drivers
+    // ! that this buffer will only be submitted and executed once. We are only doing 1 submit per frame before the command buffer
+    // ! is reset, so this is perfectly good for us.
+    VkCommandBufferBeginInfo cmdBeginInfo = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT); 
+
+    // start the command buffer recording
+    VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
+
+    // make the swapchain image into writeable mode before rendering
+    vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+    // make a clear-color from frame number.  This will flash with a 120 frame period
+    VkClearColorValue clearValue;
+    float flash = std::abs(std::sin(engine->frameNumber / 120.0f)); 
+    clearValue = { { 0.0f, 0.0f, flash, 1.0f } };
+
+    VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+
+    vkCmdClearColorImage(cmd, engine->swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+
+    // transition to presentable
+    vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    //prepare the submission to the queue. 
+	//we want to wait on the _presentSemaphore, as that semaphore is signaled when the swapchain is ready
+	//we will signal the _renderSemaphore, to signal that rendering has finished
+    VkCommandBufferSubmitInfo cmdinfo = vkinit::command_buffer_submit_info(cmd);
+
+    VkSemaphoreSubmitInfo waitInfo = vkinit::semaphore_submit_info(
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, frame->swapchainSemaphore);
+
+    VkSemaphoreSubmitInfo signalInfo = vkinit::semaphore_submit_info(
+        VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, frame->renderSemaphore);
+
+    VkSubmitInfo2 submit = vkinit::submit_info(&cmdinfo, &signalInfo, &waitInfo);
+
+    //submit command buffer to the queue and execute it.
+	// engine->renderFence will now block until the graphic commands finish execution
+    VK_CHECK(vkQueueSubmit2(engine->graphicsQueue, 1, &submit, frame->renderFence));
+
+    //prepare present
+	// this will put the image we just rendered to into the visible window.
+	// we want to wait on the _renderSemaphore for that, 
+	// as its necessary that drawing commands have finished before the image is displayed to the user
+    VkPresentInfoKHR presentInfo = {};
+    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    presentInfo.pNext = nullptr;
+    presentInfo.pSwapchains = &engine->swapchain;
+    presentInfo.swapchainCount = 1;
+
+    presentInfo.pWaitSemaphores = &frame->renderSemaphore;
+    presentInfo.waitSemaphoreCount = 1;
+
+    presentInfo.pImageIndices = &swapchainImageIndex;
+
+    VK_CHECK(vkQueuePresentKHR(engine->graphicsQueue, &presentInfo));
+
+    //increase the number of frames drawn
+    engine->frameNumber++;
 }
 
 void
