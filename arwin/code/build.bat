@@ -3,6 +3,14 @@
 echo Compilation started at %date% %time%
 echo,
 
+REM increment build counter
+set COUNTER_FILE=build_count.txt
+if not exist %COUNTER_FILE% echo 0 > %COUNTER_FILE%
+set /p BUILD_COUNT=<%COUNTER_FILE%
+set /a BUILD_COUNT+=1
+echo %BUILD_COUNT% > %COUNTER_FILE%
+echo BUILD #%BUILD_COUNT%
+
 REM LIBRARIES
 set SDL_LIB=..\arwin\external\SDL3-3.4.2\lib\x64\SDL3.lib
 set SDLIMAGE_LIB=..\arwin\external\SDL3_image-3.4.0\lib\x64\SDL3_image.lib
