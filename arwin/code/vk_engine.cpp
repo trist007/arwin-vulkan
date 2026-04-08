@@ -117,11 +117,8 @@ init_commands(VulkanEngine *engine)
 {
     // create a command pool for commands submitted to the graphics queue
     // we also want the pool to allow for resetting of individual command buffers
-    VkCommandPoolCreateInfo commandPoolInfo = {};
-    commandPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    commandPoolInfo.pNext = 0;
-    commandPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    commandPoolInfo.queueFamilyIndex = engine->graphicsQueueFamily;
+    VkCommandPoolCreateInfo commandPoolInfo = vkinit::command_pool_create_info(
+        engine->graphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
 
     for(int i = 0;
     i < FRAME_OVERLAP;
@@ -130,12 +127,7 @@ init_commands(VulkanEngine *engine)
         VK_CHECK(vkCreateCommandPool(engine->device, &commandPoolInfo, 0, &engine->frames[i].commandPool));
         
         // allocate the default command buffer that wee will use for rendering
-        VkCommandBufferAllocateInfo cmdAllocInfo = {};
-        cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        cmdAllocInfo.pNext = 0;
-        cmdAllocInfo.commandPool = engine->frames[i].commandPool;
-        cmdAllocInfo.commandBufferCount = 1;
-        cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(engine->frames[i].commandPool, 1);
 
         VK_CHECK(vkAllocateCommandBuffers(engine->device, &cmdAllocInfo, &engine->frames[i].mainCommandBuffer));
     }
@@ -196,6 +188,14 @@ cleanupVulkanEngine(VulkanEngine *engine)
 {
     if(engine->isInitialized)
     {
+        //make sure the gpu has stopped doing its business
+        vkDeviceWaitIdle(engine->device);
+
+        for(int i = 0;
+        i < FRAME_OVERLAP;
+        ++i)
+            vkDestroyCommandPool(engine->device, engine->frames[i].commandPool, 0);
+
         destroy_swapchain(engine);
 
         vkDestroySurfaceKHR(engine->instance, engine->surface, 0);
