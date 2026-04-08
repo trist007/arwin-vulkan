@@ -5,7 +5,7 @@
 // bootstrap library
 #include "VKBootstrap.h"
 
-constexpr bool bUseValidationLayers = false;
+constexpr bool bUseValidationLayers = true;
 
 static VulkanEngine *s_engine = 0;
 
@@ -55,6 +55,11 @@ init_vulkan(VulkanEngine *engine)
         .use_default_debug_messenger()
         .require_api_version(1, 3, 0)
         .build();
+
+    if (!inst_ret) {
+        SDL_Log("Failed to create Vulkan instance: %s", inst_ret.error().message().c_str());
+        abort();
+    }
 
     vkb::Instance vkb_inst = inst_ret.value();
 
@@ -210,7 +215,7 @@ runVulkanEngine(VulkanEngine *engine)
         if(engine->stop_rendering)
         {
             // throttle the speed to avoid the endless spinning
-            SDL_Delay(100);
+            SDL_Delay(5000);
             continue;
 
         }
