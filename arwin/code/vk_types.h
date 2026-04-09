@@ -16,7 +16,7 @@
 //#include <fmt/core.h> //<format> already included in c++20
 //#include <format>     // I'm going to use SDL_Log()
 
-#include "HandmadeMath.h"
+#include <HandmadeMath.h>
 //#include <glm/mat4x4.hpp>
 //#include <glm/vec4.hpp>
 

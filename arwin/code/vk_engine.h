@@ -1,6 +1,6 @@
 #pragma once
 #include <vk_types.h>
-#include "vk_descriptors.h"
+#include <vk_descriptors.h>
 #include <SDL3/SDL.h>
 
 #define MAX_SWAPCHAIN_IMAGES 8

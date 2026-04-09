@@ -1,10 +1,10 @@
-#include "vk_engine.h"
+#include <vk_engine.h>
 #include <SDL3/SDL_vulkan.h>
 #include <vk_initializers.h>
 #include <vk_images.h>
 
 // bootstrap library
-#include "VKBootstrap.h"
+#include <VKBootstrap.h>
 
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
@@ -276,9 +276,10 @@ void init_background_pipelines(VulkanEngine *engine)
 	VK_CHECK(vkCreatePipelineLayout(engine->device, &computeLayout, nullptr, &engine->gradientPipelineLayout));
 
     VkShaderModule computeDrawShader;
-	if (!vkutil::load_shader_module("../../shaders/gradient.comp.spv", engine->device, &computeDrawShader))
+	if (!vkutil::load_shader_module("../arwin/shaders/gradient.comp.spv", engine->device, &computeDrawShader))
 	{
-		SDL_Log("Error when building the compute shader \n");
+        char *cwd = SDL_GetCurrentDirectory();
+		SDL_Log("Error when loading the compute shader\nin directory: %s", cwd);
 	}
 
 	VkPipelineShaderStageCreateInfo stageinfo{};
