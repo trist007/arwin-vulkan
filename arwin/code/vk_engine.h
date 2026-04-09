@@ -55,6 +55,14 @@ struct FrameData
     DeletionQueue deletionQueue;
 };
 
+struct ComputePushConstants
+{
+    HMM_Vec4 data1;
+    HMM_Vec4 data2;
+    HMM_Vec4 data3;
+    HMM_Vec4 data4;
+};
+
 constexpr unsigned int FRAME_OVERLAP = 2;
 
 struct VulkanEngine
