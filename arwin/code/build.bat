@@ -59,6 +59,8 @@ cl %CommonCompilerFlags% ^
     ..\arwin\code\vk_initializers.cpp ^
     ..\arwin\code\vk_images.cpp ^
     ..\arwin\code\VkBootstrap.cpp ^
+    ..\arwin\code\vk_descriptors.cpp ^
+    ..\arwin\code\vk_pipelines.cpp ^
     /link %CommonLinkerFlags%
 REM/Fe:win32_arwin.exe
 

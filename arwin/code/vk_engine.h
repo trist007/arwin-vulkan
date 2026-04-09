@@ -1,5 +1,6 @@
 #pragma once
 #include <vk_types.h>
+#include "vk_descriptors.h"
 #include <SDL3/SDL.h>
 
 #define MAX_SWAPCHAIN_IMAGES 8
@@ -83,6 +84,15 @@ struct VulkanEngine
     // draw resources
     AllocatedImage drawImage;
     VkExtent2D drawExtent;
+
+    // VkDescriptor
+    DescriptorAllocator globalDescriptorAllocator;
+    VkDescriptorSet drawImageDescriptors;
+    VkDescriptorSetLayout drawImageDescriptorLayout;
+
+    // VkPipeline
+    VkPipeline gradientPipeline;
+    VkPipelineLayout gradientPipelineLayout;
 };
 
 // singleton for pointer retrieval
@@ -101,13 +111,16 @@ void init_vulkan(VulkanEngine *engine);
 void init_swapchain(VulkanEngine *engine);
 void init_commands(VulkanEngine *engine);
 void init_sync_structures(VulkanEngine *engine);
+void init_descriptors(VulkanEngine *engine);
+void init_pipelines(VulkanEngine *engine);
+void init_background_pipelines(VulkanEngine *engine);
 void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height);
 void destroy_swapchain(VulkanEngine *engine);
+void draw_background(VulkanEngine *engine, VkCommandBuffer cmd);
 // end of VkBootstrap functions
 
 void initVulkanEngine(VulkanEngine *engine);
 void cleanupVulkanEngine(VulkanEngine *engine);
 void drawVulkanEngine(VulkanEngine *engine);
 void runVulkanEngine(VulkanEngine *engine);
-void draw_background(VulkanEngine *engine, VkCommandBuffer cmd);
 FrameData *getCurrentFrame(VulkanEngine *engine);

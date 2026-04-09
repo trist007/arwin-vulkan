@@ -14,7 +14,7 @@
 #include <vk_mem_alloc.h>
 
 //#include <fmt/core.h> //<format> already included in c++20
-//#include <format>     // I'm doing to use SDL_Log()
+//#include <format>     // I'm going to use SDL_Log()
 
 #include "HandmadeMath.h"
 //#include <glm/mat4x4.hpp>
@@ -30,7 +30,7 @@
     do {                                                                \
         VkResult err = x;                                               \
         if (err) {                                                      \
-             SDL_Log("Detected Vulkan error: {}", string_VkResult(err)); \
+            SDL_Log("Detected Vulkan error: %s", string_VkResult(err)); \
             abort();                                                    \
         }                                                               \
     } while (0)
