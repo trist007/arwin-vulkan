@@ -48,6 +48,7 @@ struct FrameData
 {
     VkCommandPool commandPool;
     VkCommandBuffer mainCommandBuffer;
+
     VkSemaphore swapchainSemaphore;
     VkSemaphore renderSemaphore;
     VkFence renderFence;
@@ -58,9 +59,12 @@ constexpr unsigned int FRAME_OVERLAP = 2;
 
 struct VulkanEngine
 {
+    // general
     bool isInitialized;
     bool stop_rendering;
     int frameNumber;
+
+    // vulkan core
     VkExtent2D windowExtent;
     SDL_Window *window;
     VkInstance instance;
@@ -75,6 +79,8 @@ struct VulkanEngine
     uint32_t swapchainImageCount;
     VkExtent2D swapchainExtent;
     FrameData frames[FRAME_OVERLAP];
+
+    // queues
     VkQueue graphicsQueue;
     uint32_t graphicsQueueFamily;
     DeletionQueue deletionQueue;
@@ -93,6 +99,11 @@ struct VulkanEngine
     // VkPipeline
     VkPipeline gradientPipeline;
     VkPipelineLayout gradientPipelineLayout;
+
+    // immediate submit structures
+    VkFence immFence;
+    VkCommandBuffer immCommandBuffer;
+    VkCommandPool immCommandPool;
 };
 
 // singleton for pointer retrieval
@@ -107,6 +118,7 @@ VulkanEngine *getVulkanEngine(void);
 	VkSurfaceKHR _surface;// Vulkan window surface
 */
 
+// init functions
 void init_vulkan(VulkanEngine *engine);
 void init_swapchain(VulkanEngine *engine);
 void init_commands(VulkanEngine *engine);
@@ -114,13 +126,18 @@ void init_sync_structures(VulkanEngine *engine);
 void init_descriptors(VulkanEngine *engine);
 void init_pipelines(VulkanEngine *engine);
 void init_background_pipelines(VulkanEngine *engine);
+void init_imgui(VulkanEngine *engine);
+
+
 void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height);
 void destroy_swapchain(VulkanEngine *engine);
 void draw_background(VulkanEngine *engine, VkCommandBuffer cmd);
-// end of VkBootstrap functions
+void immediate_submit(VulkanEngine *engine, std::function<void(VkCommandBuffer cmd)>&& function);
+void draw_imgui(VulkanEngine *engine, VkCommandBuffer cmd, VkImageView targetImageView);
 
 void initVulkanEngine(VulkanEngine *engine);
 void cleanupVulkanEngine(VulkanEngine *engine);
+
 void drawVulkanEngine(VulkanEngine *engine);
 void runVulkanEngine(VulkanEngine *engine);
 FrameData *getCurrentFrame(VulkanEngine *engine);

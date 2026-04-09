@@ -61,6 +61,13 @@ cl %CommonCompilerFlags% ^
     ..\arwin\code\VkBootstrap.cpp ^
     ..\arwin\code\vk_descriptors.cpp ^
     ..\arwin\code\vk_pipelines.cpp ^
+    ..\arwin\code\imgui.cpp ^
+    ..\arwin\code\imgui_demo.cpp ^
+    ..\arwin\code\imgui_draw.cpp ^
+    ..\arwin\code\imgui_tables.cpp ^
+    ..\arwin\code\imgui_widgets.cpp ^
+    ..\arwin\code\imgui_impl_sdl3.cpp ^
+    ..\arwin\code\imgui_impl_vulkan.cpp ^
     /link %CommonLinkerFlags%
 REM/Fe:win32_arwin.exe
 
