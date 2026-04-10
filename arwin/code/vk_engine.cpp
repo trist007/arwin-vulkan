@@ -602,6 +602,10 @@ runVulkanEngine(VulkanEngine *engine)
             if(e.type == SDL_EVENT_QUIT)
                 bQuit  = true;
 
+            if(e.type == SDL_EVENT_KEY_DOWN)
+                if(e.key.scancode == SDL_SCANCODE_ESCAPE)
+                    bQuit  = true;
+
             if(e.type == SDL_EVENT_WINDOW_MINIMIZED)
                engine->stop_rendering  = true;
 
