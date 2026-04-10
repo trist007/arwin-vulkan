@@ -16,17 +16,20 @@
 //#include <fmt/core.h> //<format> already included in c++20
 //#include <format>     // I'm going to use SDL_Log()
 
-#include <HandmadeMath.h>
+// #include <HandmadeMath.h>
+#include <glm/gtx/transform.hpp>
 #include <SDL3/SDL.h>
 
 //#include <glm/mat4x4.hpp>
 //#include <glm/vec4.hpp>
 
+/*
 #ifdef DEBUG
 #define assert(Expression) if(!(Expression)) {*(int *)0 = 0;}
 #else
 #define assert(Expression)
 #endif
+*/
 
 #define VK_CHECK(x)                                                     \
     do {                                                                \
@@ -56,11 +59,11 @@ struct AllocatedBuffer
 // Mesh Buffers on GPU
 struct Vertex
 {
-    HMM_Vec3 position;
+    glm::vec3 position;
     float uv_x;
-    HMM_Vec3 normal;
+    glm::vec3 normal;
     float uv_y;
-    HMM_Vec4 color;
+    glm::vec4 color;
 };
 
 // holds the resources needed for a mesh
@@ -74,6 +77,6 @@ struct GPUMeshBuffers
 // push constants for our mesh object draws
 struct GPUDrawPushConstants
 {
-    HMM_Mat4 worldMatrix;
+    glm::mat4 worldMatrix;
     VkDeviceAddress vertexBuffer;
 };

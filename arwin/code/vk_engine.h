@@ -1,6 +1,7 @@
 #pragma once
 #include <vk_types.h>
 #include <vk_descriptors.h>
+#include <vk_loader.h>
 #include <SDL3/SDL.h>
 
 #define MAX_SWAPCHAIN_IMAGES 8
@@ -57,10 +58,10 @@ struct FrameData
 
 struct ComputePushConstants
 {
-    HMM_Vec4 data1;
-    HMM_Vec4 data2;
-    HMM_Vec4 data3;
-    HMM_Vec4 data4;
+    glm::vec4 data1;
+    glm::vec4 data2;
+    glm::vec4 data3;
+    glm::vec4 data4;
 };
 
 struct ComputeEffect
@@ -74,6 +75,8 @@ struct ComputeEffect
 };
 
 constexpr unsigned int FRAME_OVERLAP = 2;
+
+struct MeshAsset;
 
 struct VulkanEngine
 {
@@ -107,6 +110,7 @@ struct VulkanEngine
 
     // draw resources
     AllocatedImage drawImage;
+    AllocatedImage depthImage;
     VkExtent2D drawExtent;
 
     // VkDescriptor
@@ -136,6 +140,7 @@ struct VulkanEngine
     VkPipeline meshPipeline;
 
     GPUMeshBuffers rectangle;
+    std::vector<std::shared_ptr<MeshAsset>> testMeshes;
 };
 
 // singleton for pointer retrieval
@@ -179,5 +184,5 @@ FrameData *getCurrentFrame(VulkanEngine *engine);
 // Mesh buffers
 AllocatedBuffer create_buffer(VulkanEngine *engine, size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
 void destroy_buffer(VulkanEngine *engine, const AllocatedBuffer &buffer);
-GPUMeshBuffers uploadMesh(VulkanEngine *engine, std::span<uint32_t> indeces, std::span<Vertex> vertices);
+GPUMeshBuffers uploadMesh(VulkanEngine *engine, std::span<uint32_t> indices, std::span<Vertex> vertices);
 void init_default_data(VulkanEngine *engine);

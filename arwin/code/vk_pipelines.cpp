@@ -213,3 +213,16 @@ void disable_depthtest(PipelineBuilder *pipe)
     pipe->depthStencil.minDepthBounds = 0.f;
     pipe->depthStencil.maxDepthBounds = 1.f;   
 }
+
+void enable_depthtest(PipelineBuilder *pipe, bool depthWriteEnable, VkCompareOp op)
+{
+    pipe->depthStencil.depthTestEnable = VK_TRUE;
+    pipe->depthStencil.depthWriteEnable = depthWriteEnable;
+    pipe->depthStencil.depthCompareOp = op;
+    pipe->depthStencil.depthBoundsTestEnable = VK_FALSE;
+    pipe->depthStencil.stencilTestEnable = VK_FALSE;
+    pipe->depthStencil.front = {};
+    pipe->depthStencil.back = {};
+    pipe->depthStencil.minDepthBounds = 0.f;
+    pipe->depthStencil.maxDepthBounds = 1.f;
+}

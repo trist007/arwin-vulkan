@@ -3,6 +3,9 @@
 echo Compilation started at %date% %time%
 echo,
 
+REM capture start time
+set START_TIME=%time%
+
 REM increment build counter
 set COUNTER_FILE=build_count.txt
 if not exist %COUNTER_FILE% echo 0 > %COUNTER_FILE%
@@ -21,6 +24,8 @@ REM INCLUDES
 set SDL_Include=/I"..\arwin\external\SDL3-3.4.2\include"
 set SDLIMAGE_Include=/I"..\arwin\external\SDL3_image-3.4.0\include"
 set SDLTTF_Include=/I"..\arwin\external\SDL3_ttf-3.2.2\include"
+set FASTGLTF_Includes=/I"..\arwin\external\fastgltf-0.6.0\include"
+set GLM_Includes=/I"..\arwin\external\glm-1.0.3"
 REM set FMT_Include=/I"..\arwin\external\fmt-12.1.0\include" // can just use std::format in c++20
 
 set VULKAN_INCLUDE=/I"..\arwin\code"
@@ -36,7 +41,8 @@ set CommonCompilerFlags=/utf-8 /std:c++20 /EHsc ^
     /Zc:threadSafeInit- ^
     /D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR ^
     -wd4202 -wd4100 -wd4189 -wd4244 -wd4996 -wd4456 -wd4324 -FC -Z7 ^
-    %SDL_Include% %SDLIMAGE_Include% %SDLTTF_Include% %VULKAN_INCLUDE%
+    %SDL_Include% %SDLIMAGE_Include% %SDLTTF_Include% %VULKAN_INCLUDE% %FASTGLTF_Includes% %GLM_Includes% ^
+    /DGLM_ENABLE_EXPERIMENTAL
 
 set CommonLinkerFlags=-incremental:no -opt:ref /DEBUG /PDB:main.pdb %SDL_LIB% %SDLIMAGE_LIB% %SDLTTF_LIB% %VULKAN_LIB%
 
@@ -53,6 +59,18 @@ copy /Y ..\arwin\external\SDL3_ttf-3.2.2\lib\x64\SDL3_ttf.dll . > NUL
 REM delete pdb because debugger maintains a lock on pdb so pdb cannot be overwritten
 del *.pdb > NUL 2> NUL
 
+cl %CommonCompilerFlags% -wd4715 -wd4267 -wd4458 ^
+    ..\arwin\external\fastgltf-0.6.0\src\fastgltf.cpp ^
+    /c /Fofastgltf.obj
+
+cl %CommonCompilerFlags% -wd4715 -wd4267 -wd4458 ^
+    ..\arwin\external\fastgltf-0.6.0\src\base64.cpp ^
+    /c /Fobase64.obj
+
+cl %CommonCompilerFlags% -wd4127 -wd4505 -wd4715 -wd4267 -wd4458 ^
+    ..\arwin\code\simdjson.cpp ^
+    /c /Fosimdjson.obj
+
 cl %CommonCompilerFlags% ^
     ..\arwin\code\main.cpp ^
     ..\arwin\code\vk_engine.cpp ^
@@ -61,6 +79,7 @@ cl %CommonCompilerFlags% ^
     ..\arwin\code\VkBootstrap.cpp ^
     ..\arwin\code\vk_descriptors.cpp ^
     ..\arwin\code\vk_pipelines.cpp ^
+    ..\arwin\code\vk_loader.cpp ^
     ..\arwin\code\imgui.cpp ^
     ..\arwin\code\imgui_demo.cpp ^
     ..\arwin\code\imgui_draw.cpp ^
@@ -68,14 +87,46 @@ cl %CommonCompilerFlags% ^
     ..\arwin\code\imgui_widgets.cpp ^
     ..\arwin\code\imgui_impl_sdl3.cpp ^
     ..\arwin\code\imgui_impl_vulkan.cpp ^
+    fastgltf.obj base64.obj simdjson.obj ^
     /link %CommonLinkerFlags%
 REM/Fe:win32_arwin.exe
 
 popd
 
+REM capture end time and calculate the difference
+set END_TIME=%time%
+
+REM parse start time
+for /f "tokens=1-4 delims=:., " %%a in ("%START_TIME%") do (
+    set /a START_H=%%a
+    set /a START_M=%%b
+    set /a START_S=%%c
+    set /a START_CS=%%d
+)
+
+REM parse end time
+for /f "tokens=1-4 delims=:., " %%a in ("%END_TIME%") do (
+    set /a END_H=%%a
+    set /a END_M=%%b
+    set /a END_S=%%c
+    set /a END_CS=%%d
+)
+
+REM convert to centiseconds and subtract
+set /a START_TOTAL=(START_H*360000)+(START_M*6000)+(START_S*100)+START_CS
+set /a END_TOTAL=(END_H*360000)+(END_M*6000)+(END_S*100)+END_CS
+set /a DIFF=END_TOTAL-START_TOTAL
+
+REM convert back to minutes and seconds
+set /a DIFF_M=DIFF/6000
+set /a DIFF_S=(DIFF%%6000)/100
+set /a DIFF_CS=DIFF%%100
+
 echo.
 if %errorlevel% equ 0 (
                        echo Compilation finished at %date% %time%
+                       echo Build time: %DIFF_M%m %DIFF_S%.%DIFF_CS%s
                        ) else (
                                echo Compilation failed with errors at %date% %time%
+                               echo Build time: %DIFF_M%m %DIFF_S%.%DIFF_CS%s
                                )

@@ -15,6 +15,8 @@
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_vulkan.h>
 
+#include <glm/gtx/transform.hpp>
+
 constexpr bool bUseValidationLayers  = true;
 
 static VulkanEngine *s_engine  = 0;
@@ -180,6 +182,29 @@ init_swapchain(VulkanEngine *engine)
         vkDestroyImageView(engine->device, engine->drawImage.imageView, nullptr);
         vmaDestroyImage(engine->allocator, engine->drawImage.image, engine->drawImage.allocation);
     });
+
+    engine->depthImage.imageFormat = VK_FORMAT_D32_SFLOAT;
+	engine->depthImage.imageExtent = drawImageExtent;
+	VkImageUsageFlags depthImageUsages{};
+	depthImageUsages |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+
+	VkImageCreateInfo dimg_info = vkinit::image_create_info(engine->depthImage.imageFormat, depthImageUsages, drawImageExtent);
+
+	//allocate and create the image
+	vmaCreateImage(engine->allocator, &dimg_info, &rimg_allocinfo, &engine->depthImage.image, &engine->depthImage.allocation, nullptr);
+
+	//build a image-view for the draw image to use for rendering
+	VkImageViewCreateInfo dview_info = vkinit::imageview_create_info(engine->depthImage.imageFormat, engine->depthImage.image, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+	VK_CHECK(vkCreateImageView(engine->device, &dview_info, nullptr, &engine->depthImage.imageView));
+
+    engine->mainDeletionQueue.push_function([=]() {
+	vkDestroyImageView(engine->device, engine->drawImage.imageView, nullptr);
+	vmaDestroyImage(engine->allocator, engine->drawImage.image, engine->drawImage.allocation);
+
+	vkDestroyImageView(engine->device, engine->depthImage.imageView, nullptr);
+	vmaDestroyImage(engine->allocator, engine->depthImage.image, engine->depthImage.allocation);
+});
 }
 
 void
@@ -338,8 +363,8 @@ void init_background_pipelines(VulkanEngine *engine)
     gradient.data = {};
 
     //default colors
-    gradient.data.data1 = HMM_Vec4{ 1, 0, 0, 1 };
-    gradient.data.data2 = HMM_Vec4{ 0, 0, 1, 1 };
+    gradient.data.data1 = glm::vec4{ 1, 0, 0, 1 };
+    gradient.data.data2 = glm::vec4{ 0, 0, 1, 1 };
 
     VK_CHECK(vkCreateComputePipelines(engine->device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &gradient.pipeline));
 
@@ -351,7 +376,7 @@ void init_background_pipelines(VulkanEngine *engine)
     sky.name = "sky";
     sky.data = {};
     //default sky parameters
-    sky.data.data1 = HMM_Vec4{ 0.1, 0.2, 0.4 ,0.97 };
+    sky.data.data1 = glm::vec4{ 0.1, 0.2, 0.4 ,0.97 };
 
     VK_CHECK(vkCreateComputePipelines(engine->device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &sky.pipeline));
 
@@ -448,6 +473,11 @@ cleanupVulkanEngine(VulkanEngine *engine)
 
             engine->frames[i].deletionQueue.flush();
         }
+
+        for (auto& mesh : engine->testMeshes) {
+            destroy_buffer(engine, mesh->meshBuffers.indexBuffer);
+            destroy_buffer(engine, mesh->meshBuffers.vertexBuffer);
+        }
         
         // flush the global deltion queue
         engine->mainDeletionQueue.flush();
@@ -509,8 +539,11 @@ drawVulkanEngine(VulkanEngine *engine)
     draw_background(engine, cmd);
 
     //transtion the draw image and the swapchain image into their correct transfer layouts
-    vkutil::transition_image(cmd, engine->drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    // vkutil::transition_image(cmd, engine->drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     // vkutil::transition_image(cmd, engine->depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+    vkutil::transition_image(cmd, engine->drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    vkutil::transition_image(cmd, engine->depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
     draw_geometry(engine, cmd);
 
@@ -828,9 +861,10 @@ void
 draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 {
 	//begin a render pass connected to our draw image instead of swapchain
-	VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(engine->drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(engine->drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_GENERAL);
+	VkRenderingAttachmentInfo depthAttachment = vkinit::attachment_info(engine->depthImage.imageView, nullptr, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
-	VkRenderingInfo renderInfo = vkinit::rendering_info(engine->drawExtent, &colorAttachment, nullptr);
+	VkRenderingInfo renderInfo = vkinit::rendering_info(engine->drawExtent, &colorAttachment, &depthAttachment);
 	vkCmdBeginRendering(cmd, &renderInfo);
 
     // ! NOTE: trist007: VK_PIPELINE_BIND_POINT_GRAPHICS is for the graphics pipeline
@@ -858,16 +892,39 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 	//launch a draw command to draw 3 vertices
 	vkCmdDraw(cmd, 3, 1, 0, 0);
 
+//< draw rect
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->meshPipeline);
 
-	GPUDrawPushConstants push_constants;
-	push_constants.worldMatrix = HMM_Mat4{ 1.f };
+    GPUDrawPushConstants push_constants;
+	push_constants.worldMatrix = glm::mat4{ 1.f };
 	push_constants.vertexBuffer = engine->rectangle.vertexBufferAddress;
 
 	vkCmdPushConstants(cmd, engine->meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
 	vkCmdBindIndexBuffer(cmd, engine->rectangle.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
 	vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+//>
+
+//< matrix view
+    glm::mat4 view = glm::translate(glm::vec3{ 0,0,-5 });
+	// camera projection
+	glm::mat4 projection = glm::perspective(glm::radians(70.f), (float)engine->drawExtent.width / (float)engine->drawExtent.height, 10000.f, 0.1f);
+
+	// invert the Y direction on projection matrix so that we are more similar
+	// to opengl and gltf axis
+	projection[1][1] *= -1;
+
+	push_constants.worldMatrix = projection * view;
+//>
+
+//< meshdraw
+    push_constants.vertexBuffer = engine->testMeshes[2]->meshBuffers.vertexBufferAddress;
+
+	vkCmdPushConstants(cmd, engine->meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+	vkCmdBindIndexBuffer(cmd, engine->testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+	vkCmdDrawIndexed(cmd, engine->testMeshes[2]->surfaces[0].count, 1, engine->testMeshes[2]->surfaces[0].startIndex, 0, 0);
+//>
 
 	vkCmdEndRendering(cmd);    
 }
@@ -997,11 +1054,12 @@ init_mesh_pipeline(VulkanEngine *engine)
 	//no blending
 	disable_blending(&pipelineBuilder);
 
-	disable_depthtest(&pipelineBuilder);
+	// disable_depthtest(&pipelineBuilder);
+    enable_depthtest(&pipelineBuilder, true, VK_COMPARE_OP_GREATER_OR_EQUAL);
 
 	//connect the image format we will draw into, from draw image
 	set_color_attachment_format(&pipelineBuilder, engine->drawImage.imageFormat);
-	set_depth_format(&pipelineBuilder, VK_FORMAT_UNDEFINED);
+	set_depth_format(&pipelineBuilder, engine->depthImage.imageFormat);
 
 	//finally build the pipeline
 	engine->meshPipeline = build_pipeline(&pipelineBuilder, engine->device);
@@ -1046,4 +1104,7 @@ void init_default_data(VulkanEngine *engine) {
 		destroy_buffer(engine, engine->rectangle.indexBuffer);
 		destroy_buffer(engine, engine->rectangle.vertexBuffer);
 	});
+
+    // testMeshes = loadGltfMeshes(this,"..\\..\\assets\\basicmesh.glb").value();
+    engine->testMeshes = loadGltfMeshes(engine ,"../arwin/data/assets/basicmesh.glb").value();
 }
