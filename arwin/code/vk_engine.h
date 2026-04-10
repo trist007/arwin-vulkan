@@ -126,6 +126,10 @@ struct VulkanEngine
     // Compute Effects
     std::vector<ComputeEffect> backgroundEffects;
     int currentBackgroundEffect;
+
+    // Graphics pipeline
+    VkPipelineLayout trianglePipelineLayout;
+    VkPipeline trianglePipeline;
 };
 
 // singleton for pointer retrieval
@@ -149,11 +153,14 @@ void init_descriptors(VulkanEngine *engine);
 void init_pipelines(VulkanEngine *engine);
 void init_background_pipelines(VulkanEngine *engine);
 void init_imgui(VulkanEngine *engine);
+void init_triangle_pipeline(VulkanEngine *engine);
 
 
 void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height);
+AllocatedBuffer create_buffer(VulkanEngine *engine, size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
 void destroy_swapchain(VulkanEngine *engine);
 void draw_background(VulkanEngine *engine, VkCommandBuffer cmd);
+void draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd);
 void immediate_submit(VulkanEngine *engine, std::function<void(VkCommandBuffer cmd)>&& function);
 void draw_imgui(VulkanEngine *engine, VkCommandBuffer cmd, VkImageView targetImageView);
 

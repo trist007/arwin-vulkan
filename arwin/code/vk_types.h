@@ -17,6 +17,8 @@
 //#include <format>     // I'm going to use SDL_Log()
 
 #include <HandmadeMath.h>
+#include <SDL3/SDL.h>
+
 //#include <glm/mat4x4.hpp>
 //#include <glm/vec4.hpp>
 
@@ -42,4 +44,11 @@ struct AllocatedImage
     VmaAllocation allocation;
     VkExtent3D imageExtent;
     VkFormat imageFormat;
+};
+
+struct AllocatedBuffer
+{
+    VkBuffer buffer;
+    VmaAllocation allocation;
+    VmaAllocationInfo info;
 };
