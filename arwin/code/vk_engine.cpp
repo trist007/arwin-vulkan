@@ -376,6 +376,9 @@ void init_pipelines(VulkanEngine *engine)
 
     // GRAPHICS PIPELINES
     init_triangle_pipeline(engine);
+
+    // MESH PIPELINES
+    init_mesh_pipeline(engine);
 }
 
 void
@@ -852,6 +855,17 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 	//launch a draw command to draw 3 vertices
 	vkCmdDraw(cmd, 3, 1, 0, 0);
 
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->meshPipeline);
+
+	GPUDrawPushConstants push_constants;
+	push_constants.worldMatrix = HMM_Mat4{ 1.f };
+	push_constants.vertexBuffer = engine->rectangle.vertexBufferAddress;
+
+	vkCmdPushConstants(cmd, engine->meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+	vkCmdBindIndexBuffer(cmd, engine->rectangle.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+	vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+
 	vkCmdEndRendering(cmd);    
 }
 
@@ -875,4 +889,158 @@ create_buffer(VulkanEngine *engine, size_t allocSize, VkBufferUsageFlags usage, 
 		&newBuffer.info));
 
 	return newBuffer;
+}
+
+void destroy_buffer(VulkanEngine *engine, const AllocatedBuffer& buffer)
+{
+    vmaDestroyBuffer(engine->allocator, buffer.buffer, buffer.allocation);
+}
+
+GPUMeshBuffers uploadMesh(VulkanEngine *engine, std::span<uint32_t> indices, std::span<Vertex> vertices)
+{
+	const size_t vertexBufferSize = vertices.size() * sizeof(Vertex);
+	const size_t indexBufferSize = indices.size() * sizeof(uint32_t);
+
+	GPUMeshBuffers newSurface;
+
+	//create vertex buffer
+	newSurface.vertexBuffer = create_buffer(engine, vertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+		VMA_MEMORY_USAGE_GPU_ONLY);
+
+	//find the adress of the vertex buffer
+	VkBufferDeviceAddressInfo deviceAdressInfo{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = newSurface.vertexBuffer.buffer };
+	newSurface.vertexBufferAddress = vkGetBufferDeviceAddress(engine->device, &deviceAdressInfo);
+
+	//create index buffer
+	newSurface.indexBuffer = create_buffer(engine, indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VMA_MEMORY_USAGE_GPU_ONLY);
+
+	AllocatedBuffer staging = create_buffer(engine, vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+
+	void* data = staging.allocation->GetMappedData();
+
+	// copy vertex buffer
+	memcpy(data, vertices.data(), vertexBufferSize);
+	// copy index buffer
+	memcpy((char*)data + vertexBufferSize, indices.data(), indexBufferSize);
+
+	immediate_submit(engine, [&](VkCommandBuffer cmd) {
+		VkBufferCopy vertexCopy{ 0 };
+		vertexCopy.dstOffset = 0;
+		vertexCopy.srcOffset = 0;
+		vertexCopy.size = vertexBufferSize;
+
+		vkCmdCopyBuffer(cmd, staging.buffer, newSurface.vertexBuffer.buffer, 1, &vertexCopy);
+
+		VkBufferCopy indexCopy{ 0 };
+		indexCopy.dstOffset = 0;
+		indexCopy.srcOffset = vertexBufferSize;
+		indexCopy.size = indexBufferSize;
+
+		vkCmdCopyBuffer(cmd, staging.buffer, newSurface.indexBuffer.buffer, 1, &indexCopy);
+	});
+
+	destroy_buffer(engine, staging);
+
+	return newSurface;
+}
+
+void
+init_mesh_pipeline(VulkanEngine *engine)
+{
+	VkShaderModule triangleFragShader;
+
+	if (!vkutil::load_shader_module("../arwin/shaders/colored_triangle.frag.spv", engine->device, &triangleFragShader)) {
+		SDL_Log("Error when building the triangle fragment shader module");
+	}
+	else {
+		SDL_Log("Triangle fragment shader succesfully loaded");
+	}
+
+	VkShaderModule triangleVertexShader;
+	if (!vkutil::load_shader_module("../arwin/shaders/colored_triangle_mesh.vert.spv", engine->device, &triangleVertexShader)) {
+		SDL_Log("Error when building the triangle vertex shader module");
+	}
+	else {
+		SDL_Log("Triangle vertex shader succesfully loaded");
+	}
+
+	VkPushConstantRange bufferRange{};
+	bufferRange.offset = 0;
+	bufferRange.size = sizeof(GPUDrawPushConstants);
+	bufferRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+	VkPipelineLayoutCreateInfo pipeline_layout_info = vkinit::pipeline_layout_create_info();
+	pipeline_layout_info.pPushConstantRanges = &bufferRange;
+	pipeline_layout_info.pushConstantRangeCount = 1;
+
+	VK_CHECK(vkCreatePipelineLayout(engine->device, &pipeline_layout_info, nullptr, &engine->meshPipelineLayout));
+
+	PipelineBuilder pipelineBuilder = {};
+    clear(&pipelineBuilder);
+
+	//use the triangle layout we created
+	pipelineBuilder.pipelineLayout = engine->meshPipelineLayout;
+	//connecting the vertex and pixel shaders to the pipeline
+	set_shaders(&pipelineBuilder, triangleVertexShader, triangleFragShader);
+	//it will draw triangles
+	set_input_topology(&pipelineBuilder, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+	//filled triangles
+	set_polygon_mode(&pipelineBuilder, VK_POLYGON_MODE_FILL);
+	//no backface culling
+	set_cull_mode(&pipelineBuilder, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+	//no multisampling
+	set_multisampling_none(&pipelineBuilder);
+	//no blending
+	disable_blending(&pipelineBuilder);
+
+	disable_depthtest(&pipelineBuilder);
+
+	//connect the image format we will draw into, from draw image
+	set_color_attachment_format(&pipelineBuilder, engine->drawImage.imageFormat);
+	set_depth_format(&pipelineBuilder, VK_FORMAT_UNDEFINED);
+
+	//finally build the pipeline
+	engine->meshPipeline = build_pipeline(&pipelineBuilder, engine->device);
+
+	//clean structures
+	vkDestroyShaderModule(engine->device, triangleFragShader, nullptr);
+	vkDestroyShaderModule(engine->device, triangleVertexShader, nullptr);
+
+	engine->mainDeletionQueue.push_function([&]() {
+		vkDestroyPipelineLayout(engine->device, engine->meshPipelineLayout, nullptr);
+		vkDestroyPipeline(engine->device, engine->meshPipeline, nullptr);
+	});    
+}
+
+void init_default_data(VulkanEngine *engine) {
+	std::array<Vertex,4> rect_vertices;
+
+	rect_vertices[0].position = {0.5,-0.5, 0};
+	rect_vertices[1].position = {0.5,0.5, 0};
+	rect_vertices[2].position = {-0.5,-0.5, 0};
+	rect_vertices[3].position = {-0.5,0.5, 0};
+
+	rect_vertices[0].color = {0,0, 0,1};
+	rect_vertices[1].color = { 0.5,0.5,0.5 ,1};
+	rect_vertices[2].color = { 1,0, 0,1 };
+	rect_vertices[3].color = { 0,1, 0,1 };
+
+	std::array<uint32_t,6> rect_indices;
+
+	rect_indices[0] = 0;
+	rect_indices[1] = 1;
+	rect_indices[2] = 2;
+
+	rect_indices[3] = 2;
+	rect_indices[4] = 1;
+	rect_indices[5] = 3;
+
+	engine->rectangle = uploadMesh(engine, rect_indices, rect_vertices);
+
+	//delete the rectangle data on engine shutdown
+	engine->mainDeletionQueue.push_function([&](){
+		destroy_buffer(engine, engine->rectangle.indexBuffer);
+		destroy_buffer(engine, engine->rectangle.vertexBuffer);
+	});
 }

@@ -130,6 +130,12 @@ struct VulkanEngine
     // Graphics pipeline
     VkPipelineLayout trianglePipelineLayout;
     VkPipeline trianglePipeline;
+
+    // Mesh
+    VkPipelineLayout meshPipelineLayout;
+    VkPipeline meshPipeline;
+
+    GPUMeshBuffers rectangle;
 };
 
 // singleton for pointer retrieval
@@ -154,10 +160,9 @@ void init_pipelines(VulkanEngine *engine);
 void init_background_pipelines(VulkanEngine *engine);
 void init_imgui(VulkanEngine *engine);
 void init_triangle_pipeline(VulkanEngine *engine);
-
+void init_mesh_pipeline(VulkanEngine *engine);
 
 void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height);
-AllocatedBuffer create_buffer(VulkanEngine *engine, size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
 void destroy_swapchain(VulkanEngine *engine);
 void draw_background(VulkanEngine *engine, VkCommandBuffer cmd);
 void draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd);
@@ -170,3 +175,9 @@ void cleanupVulkanEngine(VulkanEngine *engine);
 void drawVulkanEngine(VulkanEngine *engine);
 void runVulkanEngine(VulkanEngine *engine);
 FrameData *getCurrentFrame(VulkanEngine *engine);
+
+// Mesh buffers
+AllocatedBuffer create_buffer(VulkanEngine *engine, size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
+void destroy_buffer(VulkanEngine *engine, const AllocatedBuffer &buffer);
+GPUMeshBuffers uploadMesh(VulkanEngine *engine, std::span<uint32_t> indeces, std::span<Vertex> vertices);
+void init_default_data(VulkanEngine *engine);
