@@ -52,6 +52,7 @@ initVulkanEngine(VulkanEngine *engine)
     init_descriptors(engine);
     init_pipelines(engine);
     init_imgui(engine);
+    init_default_data(engine);
     
     // everything went fine
     engine->isInitialized  = true;
@@ -129,7 +130,7 @@ init_vulkan(VulkanEngine *engine)
     // ! NOTE: trist007: [&]() is the lambda [&] is capture by reference which for a deletion queue
     // ! can be dangerous if the variable goes out of scope before flush() is called [=] capture by 
     // ! value is safter because it copies the handle by value at push time
-    engine->mainDeletionQueue.push_function([&]()
+    engine->mainDeletionQueue.push_function([=]()
     {
         vmaDestroyAllocator(engine->allocator);
     });
@@ -518,6 +519,8 @@ drawVulkanEngine(VulkanEngine *engine)
     vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
     vkutil::copy_image_to_image(cmd, engine->drawImage.image, engine->swapchainImages[swapchainImageIndex], engine->drawExtent, engine->swapchainExtent);
+
+    vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
     // draw imgui into the swapchain image
     draw_imgui(engine, cmd, engine->swapchainImageViews[swapchainImageIndex]);
