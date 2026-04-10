@@ -2,6 +2,7 @@
 
 int main(int argc,  char *argv[])
 {
+    // initializes everything to 0
     VulkanEngine engine = {};
 
     initVulkanEngine(&engine);

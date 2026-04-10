@@ -63,6 +63,16 @@ struct ComputePushConstants
     HMM_Vec4 data4;
 };
 
+struct ComputeEffect
+{
+    const char *name;
+
+    VkPipeline pipeline;
+    VkPipelineLayout layout;
+
+    ComputePushConstants data;
+};
+
 constexpr unsigned int FRAME_OVERLAP = 2;
 
 struct VulkanEngine
@@ -112,6 +122,10 @@ struct VulkanEngine
     VkFence immFence;
     VkCommandBuffer immCommandBuffer;
     VkCommandPool immCommandPool;
+
+    // Compute Effects
+    std::vector<ComputeEffect> backgroundEffects;
+    int currentBackgroundEffect;
 };
 
 // singleton for pointer retrieval
