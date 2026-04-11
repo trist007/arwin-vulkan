@@ -112,6 +112,7 @@ struct VulkanEngine
     AllocatedImage drawImage;
     AllocatedImage depthImage;
     VkExtent2D drawExtent;
+    float renderScale = 1.0f;
 
     // VkDescriptor
     DescriptorAllocator globalDescriptorAllocator;
@@ -141,6 +142,8 @@ struct VulkanEngine
 
     // GPUMeshBuffers rectangle;
     std::vector<std::shared_ptr<MeshAsset>> testMeshes;
+
+    bool resize_requested;
 };
 
 // singleton for pointer retrieval
@@ -173,6 +176,7 @@ void draw_background(VulkanEngine *engine, VkCommandBuffer cmd);
 void draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd);
 void immediate_submit(VulkanEngine *engine, std::function<void(VkCommandBuffer cmd)>&& function);
 void draw_imgui(VulkanEngine *engine, VkCommandBuffer cmd, VkImageView targetImageView);
+void resize_swapchain(VulkanEngine *engine);
 
 void initVulkanEngine(VulkanEngine *engine);
 void cleanupVulkanEngine(VulkanEngine *engine);

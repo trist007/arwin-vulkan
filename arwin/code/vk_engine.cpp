@@ -37,7 +37,7 @@ initVulkanEngine(VulkanEngine *engine)
     engine->windowExtent.height  = 900;
 
     SDL_Init(SDL_INIT_VIDEO);
-    SDL_WindowFlags window_flags  = (SDL_WindowFlags)(SDL_WINDOW_VULKAN);
+    SDL_WindowFlags window_flags  = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 
     engine->window = SDL_CreateWindow(
         "Vulkan Engine",
@@ -514,7 +514,13 @@ drawVulkanEngine(VulkanEngine *engine)
 
     // request image from the swapchain
     uint32_t swapchainImageIndex;
-    VK_CHECK(vkAcquireNextImageKHR(engine->device, engine->swapchain, 1000000000, frame->swapchainSemaphore, 0, &swapchainImageIndex));
+    // VK_CHECK(vkAcquireNextImageKHR(engine->device, engine->swapchain, 1000000000, frame->swapchainSemaphore, 0, &swapchainImageIndex));
+    VkResult e = vkAcquireNextImageKHR(engine->device, engine->swapchain, 1000000000, frame->swapchainSemaphore, 0, &swapchainImageIndex);
+    if(e == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        engine->resize_requested = true;
+        return;
+    }
 
     // naming it cmd for shorter writing
     VkCommandBuffer cmd  = frame->mainCommandBuffer;
@@ -529,8 +535,11 @@ drawVulkanEngine(VulkanEngine *engine)
     // ! is reset, so this is perfectly good for us.
     VkCommandBufferBeginInfo cmdBeginInfo  = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-    engine->drawExtent.width   = engine->drawImage.imageExtent.width;
-    engine->drawExtent.height  = engine->drawImage.imageExtent.height;
+    // engine->drawExtent.width   = engine->drawImage.imageExtent.width;
+    // engine->drawExtent.height  = engine->drawImage.imageExtent.height;
+
+    engine->drawExtent.height = std::min(engine->swapchainExtent.height, engine->drawImage.imageExtent.height) * engine->renderScale;
+    engine->drawExtent.width= std::min(engine->swapchainExtent.width, engine->drawImage.imageExtent.width) * engine->renderScale;
 
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
@@ -595,7 +604,12 @@ drawVulkanEngine(VulkanEngine *engine)
 
     presentInfo.pImageIndices  = &swapchainImageIndex;
 
-    VK_CHECK(vkQueuePresentKHR(engine->graphicsQueue, &presentInfo));
+    // VK_CHECK(vkQueuePresentKHR(engine->graphicsQueue, &presentInfo));
+    VkResult presentResult = vkQueuePresentKHR(engine->graphicsQueue, &presentInfo);
+    if(presentResult == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        engine->resize_requested = true;
+    }
 
     //increase the number of frames drawn
     engine->frameNumber++;
@@ -639,6 +653,9 @@ runVulkanEngine(VulkanEngine *engine)
 
         }
 
+        if(engine->resize_requested)
+            resize_swapchain(engine);
+
         // imgui new frame
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
@@ -653,6 +670,7 @@ runVulkanEngine(VulkanEngine *engine)
 		
 			ImGui::Text("Selected effect: ", selected.name);
 		
+            ImGui::SliderFloat("Render Scale",&engine->renderScale, 0.3f, 1.f);
 			ImGui::SliderInt("Effect Index", &engine->currentBackgroundEffect, 0, (int)engine->backgroundEffects.size() - 1);
 		
 			ImGui::InputFloat4("data1",(float*)& selected.data.data1);
@@ -1115,4 +1133,21 @@ void init_default_data(VulkanEngine *engine) {
     */
     // testMeshes = loadGltfMeshes(this,"..\\..\\assets\\basicmesh.glb").value();
     engine->testMeshes = loadGltfMeshes(engine ,"../arwin/data/assets/basicmesh.glb").value();
+}
+
+void
+resize_swapchain(VulkanEngine *engine)
+{
+	vkDeviceWaitIdle(engine->device);
+
+	destroy_swapchain(engine);
+
+	int w, h;
+	SDL_GetWindowSize(engine->window, &w, &h);
+	engine->windowExtent.width = w;
+	engine->windowExtent.height = h;
+
+	create_swapchain(engine, engine->windowExtent.width, engine->windowExtent.height);
+
+	engine->resize_requested = false;
 }
