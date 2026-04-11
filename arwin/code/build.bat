@@ -5,6 +5,7 @@ echo,
 
 REM capture start time
 set START_TIME=%time%
+set START_TIME=%START_TIME: =%
 
 REM increment build counter
 set COUNTER_FILE=build_count.txt
@@ -95,6 +96,7 @@ popd
 
 REM capture end time and calculate the difference
 set END_TIME=%time%
+set END_TIME=%END_TIME: =%
 
 REM parse start time
 for /f "tokens=1-4 delims=:., " %%a in ("%START_TIME%") do (

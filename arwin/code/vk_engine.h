@@ -132,14 +132,14 @@ struct VulkanEngine
     int currentBackgroundEffect;
 
     // Graphics pipeline
-    VkPipelineLayout trianglePipelineLayout;
-    VkPipeline trianglePipeline;
+    // VkPipelineLayout trianglePipelineLayout;
+    // VkPipeline trianglePipeline;
 
     // Mesh
     VkPipelineLayout meshPipelineLayout;
     VkPipeline meshPipeline;
 
-    GPUMeshBuffers rectangle;
+    // GPUMeshBuffers rectangle;
     std::vector<std::shared_ptr<MeshAsset>> testMeshes;
 };
 

@@ -401,7 +401,7 @@ void init_pipelines(VulkanEngine *engine)
     init_background_pipelines(engine);
 
     // GRAPHICS PIPELINES
-    init_triangle_pipeline(engine);
+    // init_triangle_pipeline(engine);
 
     // MESH PIPELINES
     init_mesh_pipeline(engine);
@@ -796,6 +796,7 @@ draw_imgui(VulkanEngine *engine, VkCommandBuffer cmd, VkImageView targetImageVie
 	vkCmdEndRendering(cmd);
 }
 
+/*
 void
 init_triangle_pipeline(VulkanEngine *engine)
 {
@@ -856,6 +857,7 @@ init_triangle_pipeline(VulkanEngine *engine)
 		vkDestroyPipeline(engine->device, engine->trianglePipeline, nullptr);
 	});
 }
+*/
 
 void
 draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
@@ -868,7 +870,7 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 	vkCmdBeginRendering(cmd, &renderInfo);
 
     // ! NOTE: trist007: VK_PIPELINE_BIND_POINT_GRAPHICS is for the graphics pipeline
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->trianglePipeline);
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->meshPipeline);
 
 	//set dynamic viewport and scissor
 	VkViewport viewport = {};
@@ -890,9 +892,10 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 	vkCmdSetScissor(cmd, 0, 1, &scissor);
 
 	//launch a draw command to draw 3 vertices
-	vkCmdDraw(cmd, 3, 1, 0, 0);
+	// vkCmdDraw(cmd, 3, 1, 0, 0);
 
 //< draw rect
+    /*
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->meshPipeline);
 
     GPUDrawPushConstants push_constants;
@@ -903,6 +906,7 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 	vkCmdBindIndexBuffer(cmd, engine->rectangle.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
 	vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+    */
 //>
 
 //< matrix view
@@ -914,6 +918,7 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 	// to opengl and gltf axis
 	projection[1][1] *= -1;
 
+    GPUDrawPushConstants push_constants;
 	push_constants.worldMatrix = projection * view;
 //>
 
@@ -1052,7 +1057,8 @@ init_mesh_pipeline(VulkanEngine *engine)
 	//no multisampling
 	set_multisampling_none(&pipelineBuilder);
 	//no blending
-	disable_blending(&pipelineBuilder);
+	// disable_blending(&pipelineBuilder);
+    enable_blending_additive(&pipelineBuilder);
 
 	// disable_depthtest(&pipelineBuilder);
     enable_depthtest(&pipelineBuilder, true, VK_COMPARE_OP_GREATER_OR_EQUAL);
@@ -1075,6 +1081,7 @@ init_mesh_pipeline(VulkanEngine *engine)
 }
 
 void init_default_data(VulkanEngine *engine) {
+    /*
 	std::array<Vertex,4> rect_vertices;
 
 	rect_vertices[0].position = {0.5,-0.5, 0};
@@ -1105,6 +1112,7 @@ void init_default_data(VulkanEngine *engine) {
 		destroy_buffer(engine, engine->rectangle.vertexBuffer);
 	});
 
+    */
     // testMeshes = loadGltfMeshes(this,"..\\..\\assets\\basicmesh.glb").value();
     engine->testMeshes = loadGltfMeshes(engine ,"../arwin/data/assets/basicmesh.glb").value();
 }

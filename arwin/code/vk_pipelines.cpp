@@ -226,3 +226,27 @@ void enable_depthtest(PipelineBuilder *pipe, bool depthWriteEnable, VkCompareOp 
     pipe->depthStencil.minDepthBounds = 0.f;
     pipe->depthStencil.maxDepthBounds = 1.f;
 }
+
+void enable_blending_additive(PipelineBuilder *pipe)
+{
+    pipe->colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    pipe->colorBlendAttachment.blendEnable = VK_TRUE;
+    pipe->colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    pipe->colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+    pipe->colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    pipe->colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    pipe->colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    pipe->colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+}
+
+void enable_blending_alphablend(PipelineBuilder *pipe)
+{
+    pipe->colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    pipe->colorBlendAttachment.blendEnable = VK_TRUE;
+    pipe->colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    pipe->colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    pipe->colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    pipe->colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    pipe->colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    pipe->colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+}
