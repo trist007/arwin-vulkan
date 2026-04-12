@@ -44,16 +44,27 @@ struct DeletionQueue
     }
 };
 
+struct GPUSceneData
+{
+    glm::mat4 view;
+    glm::mat4 proj;
+    glm::mat4 viewproj;
+    glm::vec4 ambientColor;
+    glm::vec4 sunlightDirection;  // w for sun power
+    glm::vec4 sunlightColor;
+};
 
 struct FrameData
 {
-    VkCommandPool commandPool;
-    VkCommandBuffer mainCommandBuffer;
-
     VkSemaphore swapchainSemaphore;
     VkSemaphore renderSemaphore;
     VkFence renderFence;
+
+    VkCommandPool commandPool;
+    VkCommandBuffer mainCommandBuffer;
+
     DeletionQueue deletionQueue;
+    DescriptorAllocatorGrowable frameDescriptors;
 };
 
 struct ComputePushConstants
@@ -74,9 +85,57 @@ struct ComputeEffect
     ComputePushConstants data;
 };
 
+struct VulkanEngine;
+
+struct GLTFMetallic_Roughness {
+	MaterialPipeline opaquePipeline;
+	MaterialPipeline transparentPipeline;
+
+	VkDescriptorSetLayout materialLayout;
+
+	struct MaterialConstants {
+		glm::vec4 colorFactors;
+		glm::vec4 metal_rough_factors;
+		//padding, we need it anyway for uniform buffers
+		glm::vec4 extra[14];
+	};
+
+	struct MaterialResources {
+		AllocatedImage colorImage;
+		VkSampler colorSampler;
+		AllocatedImage metalRoughImage;
+		VkSampler metalRoughSampler;
+		VkBuffer dataBuffer;
+		uint32_t dataBufferOffset;
+	};
+
+	DescriptorWriter writer;
+
+	void build_pipelines(VulkanEngine *engine);
+	void clear_resources(VkDevice device);
+
+	MaterialInstance write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator);
+};
+
+struct RenderObject
+{
+    uint32_t indexCount;
+    uint32_t firstIndex;
+    VkBuffer indexBuffer;
+
+    MaterialInstance *material;
+
+    glm::mat4 transform;
+    VkDeviceAddress vertexBufferAddress;
+};
+
 constexpr unsigned int FRAME_OVERLAP = 2;
 
 struct MeshAsset;
+
+struct DrawContext {
+	std::vector<RenderObject> OpaqueSurfaces;
+};
 
 struct VulkanEngine
 {
@@ -115,7 +174,7 @@ struct VulkanEngine
     float renderScale = 1.0f;
 
     // VkDescriptor
-    DescriptorAllocator globalDescriptorAllocator;
+    DescriptorAllocatorGrowable globalDescriptorAllocator;
     VkDescriptorSet drawImageDescriptors;
     VkDescriptorSetLayout drawImageDescriptorLayout;
 
@@ -144,6 +203,32 @@ struct VulkanEngine
     std::vector<std::shared_ptr<MeshAsset>> testMeshes;
 
     bool resize_requested;
+
+    GPUSceneData sceneData;
+    VkDescriptorSetLayout gpuSceneDataDescriptorLayout;
+    VkDescriptorSetLayout singleImageDescriptorLayout;
+
+    // images
+    AllocatedImage whiteImage;
+    AllocatedImage blackImage;
+    AllocatedImage greyImage;
+    AllocatedImage errorCheckerboardImage;
+
+    VkSampler defaultSamplerLinear;
+    VkSampler defaultSamplerNearest;
+
+    MaterialInstance defaultData;
+    GLTFMetallic_Roughness metalRoughMaterial;
+
+    DrawContext mainDrawContext;
+    std::unordered_map<std::string, std::shared_ptr<Node>> loadedNodes;
+};
+
+struct MeshNode : public Node {
+
+	std::shared_ptr<MeshAsset> mesh;
+
+	virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) override;
 };
 
 // singleton for pointer retrieval
@@ -177,6 +262,7 @@ void draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd);
 void immediate_submit(VulkanEngine *engine, std::function<void(VkCommandBuffer cmd)>&& function);
 void draw_imgui(VulkanEngine *engine, VkCommandBuffer cmd, VkImageView targetImageView);
 void resize_swapchain(VulkanEngine *engine);
+void update_scene(VulkanEngine *engine);
 
 void initVulkanEngine(VulkanEngine *engine);
 void cleanupVulkanEngine(VulkanEngine *engine);
@@ -190,3 +276,8 @@ AllocatedBuffer create_buffer(VulkanEngine *engine, size_t allocSize, VkBufferUs
 void destroy_buffer(VulkanEngine *engine, const AllocatedBuffer &buffer);
 GPUMeshBuffers uploadMesh(VulkanEngine *engine, std::span<uint32_t> indices, std::span<Vertex> vertices);
 void init_default_data(VulkanEngine *engine);
+
+// Textures
+AllocatedImage create_image(VulkanEngine *engine, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+AllocatedImage create_image(VulkanEngine *engine, void *data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+void destroy_image(VulkanEngine *engine, const AllocatedImage &img);
