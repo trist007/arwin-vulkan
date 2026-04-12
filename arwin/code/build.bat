@@ -98,37 +98,11 @@ REM capture end time and calculate the difference
 set END_TIME=%time%
 set END_TIME=%END_TIME: =%
 
-REM parse start time
-for /f "tokens=1-4 delims=:., " %%a in ("%START_TIME%") do (
-    set /a START_H=%%a
-    set /a START_M=%%b
-    set /a START_S=%%c
-    set /a START_CS=%%d
-)
 
-REM parse end time
-for /f "tokens=1-4 delims=:., " %%a in ("%END_TIME%") do (
-    set /a END_H=%%a
-    set /a END_M=%%b
-    set /a END_S=%%c
-    set /a END_CS=%%d
-)
-
-REM convert to centiseconds and subtract
-set /a START_TOTAL=(START_H*360000)+(START_M*6000)+(START_S*100)+START_CS
-set /a END_TOTAL=(END_H*360000)+(END_M*6000)+(END_S*100)+END_CS
-set /a DIFF=END_TOTAL-START_TOTAL
-
-REM convert back to minutes and seconds
-set /a DIFF_M=DIFF/6000
-set /a DIFF_S=(DIFF%%6000)/100
-set /a DIFF_CS=DIFF%%100
 
 echo.
 if %errorlevel% equ 0 (
                        echo Compilation finished at %date% %time%
-                       echo Build time: %DIFF_M%m %DIFF_S%.%DIFF_CS%s
                        ) else (
                                echo Compilation failed with errors at %date% %time%
-                               echo Build time: %DIFF_M%m %DIFF_S%.%DIFF_CS%s
                                )
