@@ -983,9 +983,12 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 
     GPUDrawPushConstants push_constants = {};
     push_constants.worldMatrix = projection * view;
+    push_constants.vertexBuffer = engine->testMeshes[2]->meshBuffers.vertexBufferAddress;
 
     vkCmdPushConstants(cmd, engine->meshPipelineLayout,
         VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+
+    vkCmdBindIndexBuffer(cmd, engine->testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
     // Draw the monkey head
     vkCmdDrawIndexed(cmd,
@@ -1533,6 +1536,7 @@ void init_default_data(VulkanEngine *engine)
     // testMeshes = loadGltfMeshes(this,"..\\..\\assets\\basicmesh.glb").value();
     engine->testMeshes = loadGltfMeshes(engine ,"../arwin/data/assets/basicmesh.glb").value();
 
+    /*
 	GLTFMetallic_Roughness::MaterialResources materialResources;
 	//default the material textures
 	materialResources.colorImage = engine->whiteImage;
@@ -1570,6 +1574,7 @@ void init_default_data(VulkanEngine *engine)
 
         engine->loadedNodes[m->name] = std::move(newNode);
     }
+        */
 }
 
 void
