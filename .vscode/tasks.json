@@ -15,6 +15,47 @@
             }
         },
         {
+            "label": "make",
+            "type": "shell",
+            "command": "time",
+            "args": ["/usr/bin/make", "-j"]
+            "options": {
+                "cwd": "${workspaceFolder}/arwin/code"
+            },
+            "problemMatcher": ["$msCompile"],
+            "group": {
+            "kind": "build",
+            "isDefault": true
+            }
+        },
+        {
+            "label": "make clean",
+            "type": "shell",
+            "command": "/usr/bin/make",
+            "args": ["clean"]
+            "options": {
+                "cwd": "${workspaceFolder}/arwin/code"
+            },
+            "problemMatcher": ["$msCompile"],
+            "group": {
+            "kind": "build",
+            "isDefault": true
+            }
+        },
+        {
+            "label": "make run",
+            "type": "shell",
+            "command": "${workspaceFolder}/arwin/code/arwin",
+            "options": {
+                "cwd": "${workspaceFolder}/arwin/code"
+            },
+            "problemMatcher": ["$msCompile"],
+            "group": {
+            "kind": "build",
+            "isDefault": true
+            }
+        },
+        {
             "label": "run",
             "type": "shell",
             "command": "${workspaceFolder}/arwin/code/run.bat",
