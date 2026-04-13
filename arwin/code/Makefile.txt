@@ -1,0 +1,100 @@
+# ================================================
+# Makefile for Arwin Vulkan Engine (Linux)
+# ================================================
+
+CXX := g++
+# CXX := clang++     # Uncomment if you prefer Clang
+
+BUILD_DIR := ../build
+TARGET := $(BUILD_DIR)/arwin
+
+# ------------------- Paths -------------------
+SDL_INCLUDE       := -I../arwin/external/SDL3-3.4.2/include
+SDLIMAGE_INCLUDE  := -I../arwin/external/SDL3_image-3.4.0/include
+SDLTTF_INCLUDE    := -I../arwin/external/SDL3_ttf-3.2.2/include
+FASTGLTF_INCLUDE  := -I../arwin/external/fastgltf-0.6.0/include
+GLM_INCLUDE       := -I../arwin/external/glm-1.0.3
+VULKAN_INCLUDE    := -I../arwin/code
+
+INCLUDES := $(SDL_INCLUDE) $(SDLIMAGE_INCLUDE) $(SDLTTF_INCLUDE) \
+            $(FASTGLTF_INCLUDE) $(GLM_INCLUDE) $(VULKAN_INCLUDE)
+
+# ------------------- Compiler Flags -------------------
+CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic -Wno-unused-parameter \
+            -Wno-unused-variable -Wno-missing-field-initializers \
+            -Wno-sign-compare -Wno-reorder -Wno-unused-function \
+            -O0 -g -ggdb -fPIC -pthread \
+            -DGLM_ENABLE_EXPERIMENTAL \
+            $(INCLUDES)
+
+# Debug-friendly flags (no optimization, full debug info)
+# You can add -O2 or -O3 later for release builds
+
+# ------------------- Linker Flags -------------------
+LDFLAGS := -L../arwin/external/SDL3-3.4.2/lib/x64 \
+           -L../arwin/external/SDL3_image-3.4.0/lib/x64 \
+           -L../arwin/external/SDL3_ttf-3.2.2/lib/x64
+
+LIBS := -lSDL3 -lSDL3_image -lSDL3_ttf -lvulkan -ldl -lpthread
+
+# ------------------- Source Files -------------------
+SOURCES := \
+    ../arwin/external/fastgltf-0.6.0/src/fastgltf.cpp \
+    ../arwin/external/fastgltf-0.6.0/src/base64.cpp \
+    ../arwin/code/simdjson.cpp \
+    ../arwin/code/main.cpp \
+    ../arwin/code/vk_engine.cpp \
+    ../arwin/code/vk_initializers.cpp \
+    ../arwin/code/vk_images.cpp \
+    ../arwin/code/VkBootstrap.cpp \
+    ../arwin/code/vk_descriptors.cpp \
+    ../arwin/code/vk_pipelines.cpp \
+    ../arwin/code/vk_loader.cpp \
+    ../arwin/code/camera.cpp \
+    ../arwin/code/imgui.cpp \
+    ../arwin/code/imgui_demo.cpp \
+    ../arwin/code/imgui_draw.cpp \
+    ../arwin/code/imgui_tables.cpp \
+    ../arwin/code/imgui_widgets.cpp \
+    ../arwin/code/imgui_impl_sdl3.cpp \
+    ../arwin/code/imgui_impl_vulkan.cpp
+
+OBJECTS := $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(notdir $(SOURCES)))
+
+# ------------------- Rules -------------------
+all: $(TARGET)
+
+# Create build directory
+$(BUILD_DIR):
+    mkdir -p $@
+
+# Compile each .cpp to .o
+$(BUILD_DIR)/%.o: ../arwin/external/fastgltf-0.6.0/src/%.cpp | $(BUILD_DIR)
+    $(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: ../arwin/code/%.cpp | $(BUILD_DIR)
+    $(CXX) $(CXXFLAGS) -c $< -o $@
+
+# Link everything
+$(TARGET): $(OBJECTS) | $(BUILD_DIR)
+    @echo "Linking $@ ..."
+    $(CXX) $(OBJECTS) $(LDFLAGS) $(LIBS) -o $@
+    @echo "Build finished at $$(date)"
+
+# Copy DLLs equivalent → copy shared libraries (if needed for runtime)
+copy_libs:
+    cp -u ../arwin/external/SDL3-3.4.2/lib/x64/libSDL3.so* $(BUILD_DIR)/ 2>/dev/null || true
+    cp -u ../arwin/external/SDL3_image-3.4.0/lib/x64/libSDL3_image.so* $(BUILD_DIR)/ 2>/dev/null || true
+    cp -u ../arwin/external/SDL3_ttf-3.2.2/lib/x64/libSDL3_ttf.so* $(BUILD_DIR)/ 2>/dev/null || true
+
+# Build + copy libs
+build: copy_libs all
+
+# Clean
+clean:
+    rm -rf $(BUILD_DIR)/*.o $(TARGET)
+
+# Rebuild everything
+rebuild: clean build
+
+.PHONY: all clean rebuild build copy_libs
