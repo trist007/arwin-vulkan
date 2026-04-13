@@ -81,6 +81,7 @@ cl %CommonCompilerFlags% ^
     ..\arwin\code\vk_descriptors.cpp ^
     ..\arwin\code\vk_pipelines.cpp ^
     ..\arwin\code\vk_loader.cpp ^
+    ..\arwin\code\camera.cpp ^
     ..\arwin\code\imgui.cpp ^
     ..\arwin\code\imgui_demo.cpp ^
     ..\arwin\code\imgui_draw.cpp ^

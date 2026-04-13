@@ -288,21 +288,44 @@ void init_descriptors(VulkanEngine *engine)
         DescriptorLayoutBuilder builder;
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
         engine->drawImageDescriptorLayout  = builder.build(engine->device, VK_SHADER_STAGE_COMPUTE_BIT);
+        if(engine->drawImageDescriptorLayout == VK_NULL_HANDLE)
+        {
+            SDL_Log("ERROR: Failed to create singleImageDescriptorLayout!");
+            return;
+        }
     }
     {
         DescriptorLayoutBuilder builder;
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         engine->singleImageDescriptorLayout = builder.build(engine->device, VK_SHADER_STAGE_FRAGMENT_BIT);
+
+        if(engine->singleImageDescriptorLayout == VK_NULL_HANDLE)
+        {
+            SDL_Log("ERROR: Failed to create singleImageDescriptorLayout!");
+            return;
+        }
     }
     {
         DescriptorLayoutBuilder builder;
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
         engine->gpuSceneDataDescriptorLayout = builder.build(engine->device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+        if(engine->gpuSceneDataDescriptorLayout == VK_NULL_HANDLE)
+        {
+            SDL_Log("ERROR: Failed to create singleImageDescriptorLayout!");
+            return;
+        }
+
     }
 
     //allocate a descriptor set for our draw image
 	engine->drawImageDescriptors  = engine->globalDescriptorAllocator.allocate(engine->device, engine->drawImageDescriptorLayout);
 
+    if(engine->drawImageDescriptors == VK_NULL_HANDLE)
+    {
+        SDL_Log("ERROR: Failed to allocate drawImageDescriptors!");
+        return;
+    }
+    else
     {
         DescriptorWriter writer;
         writer.write_image(0, engine->drawImage.imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
@@ -315,8 +338,10 @@ void init_descriptors(VulkanEngine *engine)
 		engine->globalDescriptorAllocator.destroy_pools(engine->device);
 
 		vkDestroyDescriptorSetLayout(engine->device, engine->drawImageDescriptorLayout, nullptr);
+		vkDestroyDescriptorSetLayout(engine->device, engine->singleImageDescriptorLayout, nullptr);
+		vkDestroyDescriptorSetLayout(engine->device, engine->gpuSceneDataDescriptorLayout, nullptr);
 	});
-
+    
 	for (int i = 0; i < FRAME_OVERLAP; i++) {
 		// create a descriptor pool
 		std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> frame_sizes = { 
@@ -425,7 +450,7 @@ void init_pipelines(VulkanEngine *engine)
     // MESH PIPELINES
     init_mesh_pipeline(engine);
 
-    engine->metalRoughMaterial.build_pipelines(engine);
+    //engine->metalRoughMaterial.build_pipelines(engine);
 }
 
 void
@@ -569,12 +594,14 @@ drawVulkanEngine(VulkanEngine *engine)
     vkutil::transition_image(cmd, engine->drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
     // being done by the compute shader
+    SDL_Log("Drawing background");
     draw_background(engine, cmd);
 
     vkutil::transition_image(cmd, engine->drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     vkutil::transition_image(cmd, engine->depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
     // drawing monkey head graphics pipeline
+    SDL_Log("Drawing geometry");
     draw_geometry(engine, cmd);
 
     //transtion the draw image and the swapchain image into their correct transfer layouts
@@ -946,14 +973,7 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
     scissor.extent = { engine->drawExtent.width, engine->drawExtent.height };
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // Bind mesh buffers (classic way)
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, 
-        &engine->testMeshes[2]->meshBuffers.vertexBuffer.buffer, &offset);
-
-    vkCmdBindIndexBuffer(cmd, 
-        engine->testMeshes[2]->meshBuffers.indexBuffer.buffer, 
-        0, VK_INDEX_TYPE_UINT32);
+    // VkCmdDraw(cmd, 3, 1, 0, 0);
 
     // Push constants (MVP only)
     glm::mat4 view = glm::translate(glm::vec3{0.0f, 0.0f, -5.0f});
@@ -1281,6 +1301,76 @@ VertexInputDescription Vertex::get_vertex_description()
 void
 init_mesh_pipeline(VulkanEngine *engine)
 {
+    VkShaderModule vertShader = VK_NULL_HANDLE;
+    VkShaderModule fragShader = VK_NULL_HANDLE;
+
+    if (!vkutil::load_shader_module("../arwin/shaders/colored_triangle_mesh.vert.spv", engine->device, &vertShader)) {
+            SDL_Log("ERROR: Failed to load colored_triangle_mesh_classic.vert.spv from directory: %s", SDL_GetCurrentDirectory());
+        vkDestroyShaderModule(engine->device, vertShader, nullptr);
+        return;
+    }
+    if (!vkutil::load_shader_module("../arwin/shaders/tex_image.frag.spv", engine->device, &fragShader)) {
+        SDL_Log("ERROR: Failed to load tex_image_classic.frag.spv from directory: %s", SDL_GetCurrentDirectory());
+        vkDestroyShaderModule(engine->device, fragShader, nullptr);
+        return;
+    }
+
+    SDL_Log("Mesh vertex and fragment shaders loaded successfully");
+
+    // Push constant range (only worldMatrix for this simple pipeline)
+    VkPushConstantRange pushConstant{};
+    pushConstant.offset     = 0;
+    pushConstant.size       = sizeof(GPUDrawPushConstants);
+    pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    // Descriptor layout (for the texture)
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo = vkinit::pipeline_layout_create_info();
+    pipelineLayoutInfo.pPushConstantRanges        = &pushConstant;
+    pipelineLayoutInfo.pushConstantRangeCount     = 1;
+    pipelineLayoutInfo.pSetLayouts                = &engine->singleImageDescriptorLayout;
+    pipelineLayoutInfo.setLayoutCount             = 1;
+
+    VK_CHECK(vkCreatePipelineLayout(engine->device, &pipelineLayoutInfo, nullptr, &engine->meshPipelineLayout));
+
+    // === Vertex Input Description ===
+    // VertexInputDescription vertexDescription = Vertex::get_vertex_description();
+
+    // Build the pipeline
+    PipelineBuilder pipelineBuilder = {};
+    clear(&pipelineBuilder);   // make sure it's zeroed
+
+    pipelineBuilder.pipelineLayout = engine->meshPipelineLayout;
+
+    set_shaders(&pipelineBuilder, vertShader, fragShader);
+    set_input_topology(&pipelineBuilder, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    set_polygon_mode(&pipelineBuilder, VK_POLYGON_MODE_FILL);
+    set_cull_mode(&pipelineBuilder, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+    set_multisampling_none(&pipelineBuilder);
+    // disable_blending(&pipelineBuilder);        // or enable if you want alpha
+    enable_depthtest(&pipelineBuilder, true, VK_COMPARE_OP_LESS_OR_EQUAL);
+
+    set_color_attachment_format(&pipelineBuilder, engine->drawImage.imageFormat);
+    set_depth_format(&pipelineBuilder, engine->depthImage.imageFormat);
+
+    SDL_Log("Vertex input being set: bindings=%u, attributes=%u",
+    pipelineBuilder.vertexInputInfo.vertexBindingDescriptionCount,
+    pipelineBuilder.vertexInputInfo.vertexAttributeDescriptionCount);
+
+    // Build it!
+    engine->meshPipeline = build_pipeline(&pipelineBuilder, engine->device);
+
+    // Cleanup shader modules
+    vkDestroyShaderModule(engine->device, vertShader, nullptr);
+    vkDestroyShaderModule(engine->device, fragShader, nullptr);
+
+    // Deletion
+    engine->mainDeletionQueue.push_function([&]() {
+        vkDestroyPipelineLayout(engine->device, engine->meshPipelineLayout, nullptr);
+        vkDestroyPipeline(engine->device, engine->meshPipeline, nullptr);
+    });
+
+    SDL_Log("Mesh pipeline created successfully");
+    /*
 	VkShaderModule triangleFragShader;
 
 	if (!vkutil::load_shader_module("../arwin/shaders/tex_image_classic.frag.spv", engine->device, &triangleFragShader)) {
@@ -1357,6 +1447,7 @@ init_mesh_pipeline(VulkanEngine *engine)
 		vkDestroyPipelineLayout(engine->device, engine->meshPipelineLayout, nullptr);
 		vkDestroyPipeline(engine->device, engine->meshPipeline, nullptr);
 	});    
+    */
 }
 
 void init_default_data(VulkanEngine *engine)

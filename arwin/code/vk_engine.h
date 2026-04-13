@@ -2,6 +2,7 @@
 #include <vk_types.h>
 #include <vk_descriptors.h>
 #include <vk_loader.h>
+#include <camera.h>
 #include <SDL3/SDL.h>
 
 #define MAX_SWAPCHAIN_IMAGES 8
@@ -222,6 +223,8 @@ struct VulkanEngine
 
     DrawContext mainDrawContext;
     std::unordered_map<std::string, std::shared_ptr<Node>> loadedNodes;
+
+    Camera mainCamera;
 };
 
 struct MeshNode : public Node {

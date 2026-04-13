@@ -117,7 +117,7 @@ VkPipeline build_pipeline(PipelineBuilder *pipe, VkDevice device)
     // ! pipeline because we are using VkDynamicState
     VkDynamicState state[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 
-    VkPipelineDynamicStateCreateInfo dynamicInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+    VkPipelineDynamicStateCreateInfo dynamicInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO }; 
     dynamicInfo.pDynamicStates = &state[0];
     dynamicInfo.dynamicStateCount = 2;
 
@@ -125,15 +125,22 @@ VkPipeline build_pipeline(PipelineBuilder *pipe, VkDevice device)
 
     // its easy to error out on create graphics pipeline, so we handle it a bit
     // better than the common VK_CHECK case
-    VkPipeline newPipeline;
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
-            nullptr, &newPipeline)
-        != VK_SUCCESS) {
+    VkPipeline newPipeline = VK_NULL_HANDLE;
+
+    VkResult result = vkCreateGraphicsPipelines(device,
+        VK_NULL_HANDLE,
+        1,
+        &pipelineInfo,
+        nullptr,
+        &newPipeline);
+
+    if(result != VK_SUCCESS)
+    {
         SDL_Log("failed to create pipeline");
         return VK_NULL_HANDLE; // failed to create graphics pipeline
-    } else {
-        return newPipeline;
     }
+
+    return newPipeline;
 }
 
 void set_shaders(PipelineBuilder *pipe, VkShaderModule vertexShader, VkShaderModule fragmentShader)
