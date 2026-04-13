@@ -41,8 +41,8 @@
 
 #include <vulkan/vulkan_core.h>
 
-#include "VkBootstrapDispatch.h"
-#include "VkBootstrapFeatureChain.h"
+#include <VkBootstrapDispatch.h>
+#include <VKBootstrapFeatureChain.h>
 
 #ifdef VK_MAKE_API_VERSION
 #define VKB_MAKE_VK_VERSION(variant, major, minor, patch) VK_MAKE_API_VERSION(variant, major, minor, patch)
