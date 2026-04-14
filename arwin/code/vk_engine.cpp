@@ -1,25 +1,31 @@
-#include <vk_engine.h>
+#include "vk_engine.h"
 #include <SDL3/SDL_vulkan.h>
-#include <vk_initializers.h>
-#include <vk_images.h>
+#include "vk_initializers.h"
+#include "vk_images.h"
 
 // bootstrap library
-#include <VKBootstrap.h>
+#include "VKBootstrap.h"
 
 #define VMA_IMPLEMENTATION
-#include <vk_mem_alloc.h>
-#include <vk_pipelines.h>
+#include "vk_mem_alloc.h"
+#include "vk_pipelines.h"
 
 // IMGui
-#include <imgui.h>
-#include <imgui_impl_sdl3.h>
-#include <imgui_impl_vulkan.h>
+#include "imgui.h"
+#include "imgui_impl_sdl3.h"
+#include "imgui_impl_vulkan.h"
 
 #include <glm/gtx/transform.hpp>
 
 constexpr bool bUseValidationLayers  = true;
 
 static VulkanEngine *s_engine  = 0;
+
+void
+sdl_log_stderr(void *userData, int category, SDL_LogPriority priority, const char *message)
+{
+    fprintf(stderr, "%s\n", message);
+}
 
 VulkanEngine *
 getVulkanEngine(void)
@@ -30,6 +36,9 @@ getVulkanEngine(void)
 void
 initVulkanEngine(VulkanEngine *engine)
 {
+    // redirect SDL_Log to stderr
+    SDL_SetLogOutputFunction(sdl_log_stderr, NULL);
+
     assert(s_engine == 0);
     s_engine  = engine;
 
@@ -77,6 +86,8 @@ init_vulkan(VulkanEngine *engine)
         abort();
     }
 
+    SDL_Log("Vulkan Instance created");
+
     vkb::Instance vkb_inst  = inst_ret.value();
 
     // grab the instance
@@ -84,6 +95,14 @@ init_vulkan(VulkanEngine *engine)
     engine->debugMessenger  = vkb_inst.debug_messenger;
 
     SDL_Vulkan_CreateSurface(engine->window, engine->instance, 0, &engine->surface);
+    /*
+    {
+        SDL_Log("Failed to create Vulkan surface: %s", SDL_GetError());
+        abort();
+    }
+    */
+
+    SDL_Log("Created a SDL Surface");
 
     //vulkan 1.3 features
 	VkPhysicalDeviceVulkan13Features features{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
@@ -379,12 +398,12 @@ void init_background_pipelines(VulkanEngine *engine)
     VK_CHECK(vkCreatePipelineLayout(engine->device, &computeLayout, nullptr, &engine->gradientPipelineLayout));
 
     VkShaderModule gradientShader;
-    if (!vkutil::load_shader_module("../arwin/shaders/gradient_color.comp.spv", engine->device, &gradientShader)) {
+    if (!vkutil::load_shader_module("../shaders/gradient_color.comp.spv", engine->device, &gradientShader)) {
     SDL_Log("Error when building the compute shader \n");
     }
 
     VkShaderModule skyShader;
-    if (!vkutil::load_shader_module("../arwin/shaders/sky.comp.spv", engine->device, &skyShader)) {
+    if (!vkutil::load_shader_module("../shaders/sky.comp.spv", engine->device, &skyShader)) {
     SDL_Log("Error when building the compute shader \n");
     }
 
@@ -442,7 +461,7 @@ void init_background_pipelines(VulkanEngine *engine)
 void init_pipelines(VulkanEngine *engine)
 {
     // COMPUTE PIPELINES
-    init_background_pipelines(engine);
+    // init_background_pipelines(engine);
 
     // GRAPHICS PIPELINES
     // init_triangle_pipeline(engine);
@@ -1307,12 +1326,12 @@ init_mesh_pipeline(VulkanEngine *engine)
     VkShaderModule vertShader = VK_NULL_HANDLE;
     VkShaderModule fragShader = VK_NULL_HANDLE;
 
-    if (!vkutil::load_shader_module("../arwin/shaders/colored_triangle_mesh.vert.spv", engine->device, &vertShader)) {
+    if (!vkutil::load_shader_module("../shaders/colored_triangle_mesh.vert.spv", engine->device, &vertShader)) {
             SDL_Log("ERROR: Failed to load colored_triangle_mesh_classic.vert.spv from directory: %s", SDL_GetCurrentDirectory());
         vkDestroyShaderModule(engine->device, vertShader, nullptr);
         return;
     }
-    if (!vkutil::load_shader_module("../arwin/shaders/tex_image.frag.spv", engine->device, &fragShader)) {
+    if (!vkutil::load_shader_module("../shaders/tex_image.frag.spv", engine->device, &fragShader)) {
         SDL_Log("ERROR: Failed to load tex_image_classic.frag.spv from directory: %s", SDL_GetCurrentDirectory());
         vkDestroyShaderModule(engine->device, fragShader, nullptr);
         return;

@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug",
+            "name": "Debug (Windows - MSVC)",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/main.exe",
@@ -11,6 +11,31 @@
             "cwd": "${workspaceFolder}/build",
             "environment": [],
             "console": "integratedTerminal"
+        },
+        {
+            // New Linux configuration using GDB
+            "name": "Debug (Linux - GDB)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/arwin/code/arwin",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "console": "integratedTerminal",
+
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/sbin/gdb",
+
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for STL, glm, etc.",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+
+            "preLaunchTask": "make"
         }
     ]
 }

@@ -11,7 +11,7 @@
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_enum_string_helper.h>
-#include <vk_mem_alloc.h>
+#include "vk_mem_alloc.h"
 
 //#include <fmt/core.h> //<format> already included in c++20
 //#include <format>     // I'm going to use SDL_Log()

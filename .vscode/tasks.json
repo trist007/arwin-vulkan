@@ -32,7 +32,7 @@
             "label": "make clean",
             "type": "shell",
             "command": "/usr/bin/make",
-            "args": ["clean"]
+            "args": ["clean"],
             "options": {
                 "cwd": "${workspaceFolder}/arwin/code"
             },
@@ -45,9 +45,9 @@
         {
             "label": "make run",
             "type": "shell",
-            "command": "${workspaceFolder}/arwin/code/arwin",
+            "command": "${workspaceFolder}/arwin/bin/arwin",
             "options": {
-                "cwd": "${workspaceFolder}/arwin/code"
+                "cwd": "${workspaceFolder}/arwin/bin"
             },
             "problemMatcher": ["$msCompile"],
             "group": {
