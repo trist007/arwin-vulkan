@@ -1,3 +1,7 @@
 {
-    "makefile.makefilePath": "${workspaceFolder}/arwin/code/Makefile"
+    "makefile.makefilePath": "${workspaceFolder}/arwin/code/Makefile",
+    "clangd.arguments": [
+        "--completion-style=detailed",
+        "--header-insertion=never"
+    ]
 }

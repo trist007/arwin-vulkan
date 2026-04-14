@@ -69,6 +69,26 @@ initVulkanEngine(VulkanEngine *engine)
     engine->isInitialized  = true;
 }
 
+void print_devices(const vkb::Instance& vkb_inst)
+{
+    vkb::PhysicalDeviceSelector selector { vkb_inst };
+
+    auto result = selector.select_device_names();
+
+    if(!result)
+    {
+        SDL_Log("Error selecting devices: %s", result.error().message().c_str());
+    }
+
+    const std::vector<std::string>& devices = result.value();
+
+    SDL_Log("Available Vulkan Physical Devices (%zu):", devices.size());
+
+    for (size_t i = 0; i < devices.size(); ++i) {
+        SDL_Log(" %zu. %s", i + 1, devices[i].c_str());
+    }
+}
+
 void
 init_vulkan(VulkanEngine *engine)
 {
@@ -114,7 +134,6 @@ init_vulkan(VulkanEngine *engine)
 	features12.bufferDeviceAddress  = true;
 	features12.descriptorIndexing   = true;
 
-
 	//use vkbootstrap to select a gpu. 
 	//We want a gpu that can write to the SDL surface and supports vulkan 1.3 with the correct features
 	vkb::PhysicalDeviceSelector selector{ vkb_inst };
@@ -126,9 +145,13 @@ init_vulkan(VulkanEngine *engine)
 		.select()
 		.value();
 
+    // === Print available physical devices ===
+    //print_devices(vkb_inst);        // ← Add this line
 
 	//create the final vulkan device
 	vkb::DeviceBuilder deviceBuilder{ physicalDevice };
+
+    SDL_Log("Selected a Vulkan Physical Device: %s", physicalDevice.name.c_str());
 
 	vkb::Device vkbDevice  = deviceBuilder.build().value();
 
@@ -1553,7 +1576,7 @@ void init_default_data(VulkanEngine *engine)
 	});
 
     // testMeshes = loadGltfMeshes(this,"..\\..\\assets\\basicmesh.glb").value();
-    engine->testMeshes = loadGltfMeshes(engine ,"../arwin/data/assets/basicmesh.glb").value();
+    engine->testMeshes = loadGltfMeshes(engine ,"../data/assets/basicmesh.glb").value();
 
     /*
 	GLTFMetallic_Roughness::MaterialResources materialResources;
