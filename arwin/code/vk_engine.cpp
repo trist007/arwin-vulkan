@@ -587,6 +587,22 @@ cleanupVulkanEngine(VulkanEngine *engine)
 void
 drawVulkanEngine(VulkanEngine *engine)
 {
+    SDL_Log("=== draw_geometry() called ===");
+
+    if (engine->testMeshes.empty()) {
+        SDL_Log("ERROR: testMeshes is empty!");
+        return;
+    }
+
+    if (engine->testMeshes[2] == nullptr) {
+        SDL_Log("ERROR: testMeshes[2] is null!");
+        return;
+    }
+
+    SDL_Log("Drawing mesh: %s with %u indices", 
+            engine->testMeshes[2]->name.c_str(), 
+            engine->testMeshes[2]->surfaces[0].count);
+
     FrameData *frame  = getCurrentFrame(engine);
 
     // ! NOTE: trist007: We use vkWaitForFences() to wait for the GPU to have finished its work, and after it we reset the fence.
@@ -633,32 +649,58 @@ drawVulkanEngine(VulkanEngine *engine)
 
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
-    vkutil::transition_image(cmd, engine->drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+    // 1. Transition drawImage to COLOR_ATTACHMENT_OPTIMAL and clear it to black
+    vkutil::transition_image(cmd, engine->drawImage.image, 
+                            VK_IMAGE_LAYOUT_UNDEFINED, 
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                            //VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-    // being done by the compute shader
-    SDL_Log("Drawing background");
-    draw_background(engine, cmd);
+    VkClearValue clearBlack = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+    VkImageSubresourceRange clearRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
-    vkutil::transition_image(cmd, engine->drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    vkutil::transition_image(cmd, engine->depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+    vkCmdClearColorImage(cmd, engine->drawImage.image, 
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
+                        &clearBlack.color, 1, &clearRange);
 
-    // drawing monkey head graphics pipeline
-    SDL_Log("Drawing geometry");
+    // 2. Transition depth image
+    vkutil::transition_image(cmd, engine->drawImage.image, 
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
+                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+    // 2. Transition depth image
+    vkutil::transition_image(cmd, engine->depthImage.image, 
+                            VK_IMAGE_LAYOUT_UNDEFINED, 
+                            VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+    // 3. Draw the geometry (monkey)
+    SDL_Log("Drawing geometry - monkey head");
     draw_geometry(engine, cmd);
 
-    //transtion the draw image and the swapchain image into their correct transfer layouts
-	vkutil::transition_image(cmd, engine->drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    // 4. Transition drawImage for copy to swapchain
+    vkutil::transition_image(cmd, engine->drawImage.image, 
+                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 
+                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
-    vkutil::copy_image_to_image(cmd, engine->drawImage.image, engine->swapchainImages[swapchainImageIndex], engine->drawExtent, engine->swapchainExtent);
+    vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], 
+                            VK_IMAGE_LAYOUT_UNDEFINED, 
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-    vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    // 5. Copy drawImage → swapchain
+    vkutil::copy_image_to_image(cmd, engine->drawImage.image, 
+                                engine->swapchainImages[swapchainImageIndex], 
+                                engine->drawExtent, engine->swapchainExtent);
 
-    // draw imgui into the swapchain image
+    // 6. Transition swapchain image for ImGui / present
+    vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], 
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
+                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
     draw_imgui(engine, cmd, engine->swapchainImageViews[swapchainImageIndex]);
 
-    // vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-    vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], 
+                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 
+                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
@@ -970,6 +1012,13 @@ init_triangle_pipeline(VulkanEngine *engine)
 void
 draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 {
+    SDL_Log("draw_geometry() called - attempting to draw magenta monkey head");
+
+    if (engine->testMeshes.empty() || engine->testMeshes[2] == nullptr) {
+        SDL_Log("ERROR: No mesh loaded!");
+        return;
+    }
+
     VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(
         engine->drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
@@ -1032,12 +1081,20 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 
     vkCmdBindIndexBuffer(cmd, engine->testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
+    SDL_Log("Mesh pipeline bound, about to draw indexed");
+    SDL_Log("About to issue drawIndexed: %u indices", 
+        engine->testMeshes[2]->surfaces[0].count);
+
     // Draw the monkey head
     vkCmdDrawIndexed(cmd,
         engine->testMeshes[2]->surfaces[0].count,
         1,
         engine->testMeshes[2]->surfaces[0].startIndex,
         0, 0);
+
+    vkCmdEndRendering(cmd);
+
+    SDL_Log("draw_geometry finished");
 
     // === Push constants + Draw the monkey (simple non-indexed for now) ===
     /*
@@ -1061,7 +1118,6 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
     vkCmdDraw(cmd, engine->testMeshes[2]->surfaces[0].count, 1, 0, 0);
     */
 
-    vkCmdEndRendering(cmd);
     /*
 	//begin a render pass connected to our draw image instead of swapchain
 	VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(
