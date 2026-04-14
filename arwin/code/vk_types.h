@@ -74,7 +74,7 @@ struct MaterialInstance {
 
 struct DrawContext;
 
-struct IRenderable
+class IRenderable
 {
     virtual void Draw(const glm::mat4 &topMatrix, DrawContext &ctx) = 0;
 };

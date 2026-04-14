@@ -492,7 +492,7 @@ void init_pipelines(VulkanEngine *engine)
     // MESH PIPELINES
     init_mesh_pipeline(engine);
 
-    //engine->metalRoughMaterial.build_pipelines(engine);
+    engine->metalRoughMaterial.build_pipelines(engine);
 }
 
 void
@@ -605,6 +605,8 @@ drawVulkanEngine(VulkanEngine *engine)
 
     FrameData *frame  = getCurrentFrame(engine);
 
+    //update_scene(engine);
+
     // ! NOTE: trist007: We use vkWaitForFences() to wait for the GPU to have finished its work, and after it we reset the fence.
     // ! Fences have to be reset between uses, you can’t use the same fence on multiple GPU commands without resetting it in the middle.
     // ! The timeout of the WaitFences call is of 1 second. It’s using nanoseconds for the wait time. If you call the function with 0 as
@@ -705,7 +707,7 @@ drawVulkanEngine(VulkanEngine *engine)
                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-    //draw_imgui(engine, cmd, engine->swapchainImageViews[swapchainImageIndex]);
+    draw_imgui(engine, cmd, engine->swapchainImageViews[swapchainImageIndex]);
 
     vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], 
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 
@@ -799,7 +801,6 @@ runVulkanEngine(VulkanEngine *engine)
             resize_swapchain(engine);
 
         // imgui new frame
-        /*
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
@@ -825,7 +826,6 @@ runVulkanEngine(VulkanEngine *engine)
 
         // make imgui calculate internal draw structures
         ImGui::Render();
-            */
 
         drawVulkanEngine(engine);
     }
@@ -1100,131 +1100,6 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 
     SDL_Log("draw_geometry finished");
 
-    // === Push constants + Draw the monkey (simple non-indexed for now) ===
-    /*
-    glm::mat4 view = glm::translate(glm::vec3{0.0f, 0.0f, -6.0f});
-
-    glm::mat4 projection = glm::perspective(
-        glm::radians(70.0f),
-        (float)engine->drawExtent.width / (float)engine->drawExtent.height,
-        0.1f, 100.0f);
-    projection[1][1] *= -1.0f;
-
-    GPUDrawPushConstants push_constants = {};
-    push_constants.worldMatrix = projection * view;
-    push_constants.vertexBuffer = engine->testMeshes[2]->meshBuffers.vertexBufferAddress;
-
-    vkCmdPushConstants(cmd, engine->meshPipelineLayout,
-        VK_SHADER_STAGE_VERTEX_BIT, 0,
-        sizeof(GPUDrawPushConstants), &push_constants);
-
-    // Draw using vertex count from the mesh (non-indexed for safety)
-    vkCmdDraw(cmd, engine->testMeshes[2]->surfaces[0].count, 1, 0, 0);
-    */
-
-    /*
-	//begin a render pass connected to our draw image instead of swapchain
-	VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(
-        engine->drawImage.imageView,
-        nullptr,
-        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-
-	VkRenderingAttachmentInfo depthAttachment = vkinit::attachment_info(
-        engine->depthImage.imageView,
-        nullptr, // Critical: clear to 1.0f
-        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-
-	VkRenderingInfo renderInfo = vkinit::rendering_info(engine->drawExtent, &colorAttachment, &depthAttachment);
-	vkCmdBeginRendering(cmd, &renderInfo);
-
-    // ! NOTE: trist007: VK_PIPELINE_BIND_POINT_GRAPHICS is for the graphics pipeline
-
-    // Bind the mesh pipeline
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->meshPipeline);
-
-    // Bind Descriptor set before any draw
-    FrameData *frame  = getCurrentFrame(engine);
-	VkDescriptorSet imageSet = frame->frameDescriptors.allocate(engine->device, engine->singleImageDescriptorLayout);
-	{
-		DescriptorWriter writer;
-		writer.write_image(0, engine->errorCheckerboardImage.imageView, engine->defaultSamplerNearest, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-
-		writer.update_set(engine->device, imageSet);
-	}
-
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->meshPipelineLayout, 0, 1, &imageSet, 0, nullptr);
-
-	//set dynamic viewport and scissor
-	VkViewport viewport = {};
-	viewport.x = 0;
-	viewport.y = 0;
-	viewport.width = engine->drawExtent.width;
-	viewport.height = engine->drawExtent.height;
-	viewport.minDepth = 0.f;
-	viewport.maxDepth = 1.f;
-
-	vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-	VkRect2D scissor = {};
-	scissor.offset.x = 0;
-	scissor.offset.y = 0;
-	scissor.extent.width = engine->drawExtent.width;
-	scissor.extent.height = engine->drawExtent.height;
-
-	vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-	//launch a draw command to draw 3 vertices
-	// vkCmdDraw(cmd, 3, 1, 0, 0);
-
-	//bind a texture monkey head
-	glm::mat4 view = glm::translate(glm::vec3{ 0,0,-5 });
-
-	// camera projection
-	glm::mat4 projection = glm::perspective(
-        glm::radians(70.f),
-        (float)engine->drawExtent.width / (float)engine->drawExtent.height,
-        10000.f,
-        0.1f);
-
-	// invert the Y direction on projection matrix so that we are more similar
-	// to opengl and gltf axis, Vulkan Y flip
-	projection[1][1] *= -1;
-
-	GPUDrawPushConstants push_constants = {};
-	push_constants.worldMatrix = projection * view;
-	push_constants.vertexBuffer = engine->testMeshes[2]->meshBuffers.vertexBufferAddress;
-
-	vkCmdPushConstants(cmd, engine->meshPipelineLayout,
-        VK_SHADER_STAGE_VERTEX_BIT,
-        0,
-        sizeof(GPUDrawPushConstants),
-        
-        &push_constants);
-
-          // Draw using vertex count from the mesh (non-indexed for safety)
-    uint32_t vertexCount = engine->testMeshes[2]->surfaces[0].count;
-    vkCmdDraw(cmd, vertexCount, 1, 0, 0);
-
-    vkCmdEndRendering(cmd);
-    */
-/*
-	vkCmdBindIndexBuffer(cmd,
-    engine->testMeshes[2]->meshBuffers.indexBuffer.buffer,
-    0,
-    VK_INDEX_TYPE_UINT32);
-
-	vkCmdDrawIndexed(cmd,
-        engine->testMeshes[2]->surfaces[0].count,    // index count
-        1,                                           // instance count
-        engine->testMeshes[2]->surfaces[0].startIndex,
-        0,                                           // vertex offset
-        0);                                          // first instance
-
-
-	vkCmdEndRendering(cmd);    
-    */
-//>
- /*
 	//allocate a new uniform buffer for the scene data
 	AllocatedBuffer gpuSceneDataBuffer = create_buffer(engine, sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
@@ -1243,7 +1118,7 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 	DescriptorWriter writer;
 	writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 	writer.update_set(engine->device, globalDescriptor);
-	for (const RenderObject& draw : mainDrawContext.OpaqueSurfaces) {
+	for (const RenderObject& draw : engine->mainDrawContext.OpaqueSurfaces) {
 
 		vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS, draw.material->pipeline->pipeline);
 		vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,draw.material->pipeline->layout, 0,1, &globalDescriptor,0,nullptr );
@@ -1258,7 +1133,6 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 
 		vkCmdDrawIndexed(cmd,draw.indexCount,1,draw.firstIndex,0,0);
 	}
-    */
 }
 
 AllocatedBuffer
@@ -1456,7 +1330,7 @@ init_mesh_pipeline(VulkanEngine *engine)
     VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     */
 
-    pipelineBuilder.colorBlendAttachment.blendEnable = VK_FALSE;
+    //pipelineBuilder.colorBlendAttachment.blendEnable = VK_FALSE;
 
     set_polygon_mode(&pipelineBuilder, VK_POLYGON_MODE_FILL);
     set_cull_mode(&pipelineBuilder, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
@@ -1648,9 +1522,8 @@ void init_default_data(VulkanEngine *engine)
 
     // testMeshes = loadGltfMeshes(this,"..\\..\\assets\\basicmesh.glb").value();
     //engine->testMeshes = loadGltfMeshes(engine ,"../data/models/arwin8.glb").value();
-    engine->testMeshes = loadGltfMeshes(engine ,"../data/assets/basicmesh.glb").value();
+    //engine->testMeshes = loadGltfMeshes(engine ,"../data/assets/basicmesh.glb").value();
 
-    /*
 	GLTFMetallic_Roughness::MaterialResources materialResources;
 	//default the material textures
 	materialResources.colorImage = engine->whiteImage;
@@ -1675,6 +1548,8 @@ void init_default_data(VulkanEngine *engine)
 
 	engine->defaultData = engine->metalRoughMaterial.write_material(engine->device, MaterialPass::MainColor, materialResources, engine->globalDescriptorAllocator);
 
+    engine->testMeshes = loadGltfMeshes(engine ,"../data/assets/basicmesh.glb").value();
+
     for (auto& m : engine->testMeshes) {
         std::shared_ptr<MeshNode> newNode = std::make_shared<MeshNode>();
         newNode->mesh = m;
@@ -1688,7 +1563,6 @@ void init_default_data(VulkanEngine *engine)
 
         engine->loadedNodes[m->name] = std::move(newNode);
     }
-        */
 }
 
 void
@@ -1788,12 +1662,12 @@ void destroy_image(VulkanEngine *engine, const AllocatedImage& img)
 void GLTFMetallic_Roughness::build_pipelines(VulkanEngine* engine)
 {
 	VkShaderModule meshFragShader;
-	if (!vkutil::load_shader_module("../../shaders/mesh.frag.spv", engine->device, &meshFragShader)) {
+	if (!vkutil::load_shader_module("../shaders/mesh.frag.spv", engine->device, &meshFragShader)) {
 		SDL_Log("Error when building the triangle fragment shader module");
 	}
 
 	VkShaderModule meshVertexShader;
-	if (!vkutil::load_shader_module("../../shaders/mesh.vert.spv", engine->device, &meshVertexShader)) {
+	if (!vkutil::load_shader_module("../shaders/mesh.vert.spv", engine->device, &meshVertexShader)) {
 		SDL_Log("Error when building the triangle vertex shader module");
 	}
 
@@ -1905,7 +1779,21 @@ void update_scene(VulkanEngine *engine)
 {
 	engine->mainDrawContext.OpaqueSurfaces.clear();
 
-	engine->loadedNodes["Suzanne"]->Draw(glm::mat4{1.f}, engine->mainDrawContext);	
+	//engine->loadedNodes["Suzanne"]->Draw(glm::mat4{1.f}, engine->mainDrawContext);	
+
+    for (auto& m : engine->loadedNodes)
+    {
+        m.second->Draw(glm::mat4{1.f}, engine->mainDrawContext);                                                                                                                                 
+    }
+
+    for (int x = -3; x < 3; x++)
+    { 
+
+        glm::mat4 scale = glm::scale(glm::vec3{0.2});
+        glm::mat4 translation =  glm::translate(glm::vec3{x, 1, 0});
+
+        engine->loadedNodes["Cube"]->Draw(translation * scale, engine->mainDrawContext);
+	}
 
 	engine->sceneData.view = glm::translate(glm::vec3{ 0,0,-5 });
 	// camera projection
