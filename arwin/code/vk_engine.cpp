@@ -484,7 +484,7 @@ void init_background_pipelines(VulkanEngine *engine)
 void init_pipelines(VulkanEngine *engine)
 {
     // COMPUTE PIPELINES
-    // init_background_pipelines(engine);
+    init_background_pipelines(engine);
 
     // GRAPHICS PIPELINES
     // init_triangle_pipeline(engine);
