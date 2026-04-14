@@ -67,6 +67,12 @@ initVulkanEngine(VulkanEngine *engine)
     
     // everything went fine
     engine->isInitialized  = true;
+
+    engine->mainCamera.velocity = glm::vec3(0.f);
+    engine->mainCamera.position = glm::vec3(0, 0, 5);
+
+    engine->mainCamera.pitch = 0;
+    engine->mainCamera.yaw = 0; 
 }
 
 void print_devices(const vkb::Instance& vkb_inst)
@@ -784,7 +790,8 @@ runVulkanEngine(VulkanEngine *engine)
             if(e.type == SDL_EVENT_WINDOW_RESTORED)
                engine->stop_rendering  = false;
 
-            // send SDL event to imgui for handling
+            // send SDL event to camera and imgui for handling
+            engine->mainCamera.processSDLEvent(e);
             ImGui_ImplSDL3_ProcessEvent(&e);
         }
 
@@ -1777,32 +1784,20 @@ void MeshNode::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
 
 void update_scene(VulkanEngine *engine)
 {
-	engine->mainDrawContext.OpaqueSurfaces.clear();
+    engine->mainCamera.update();
 
-	//engine->loadedNodes["Suzanne"]->Draw(glm::mat4{1.f}, engine->mainDrawContext);	
+    glm::mat4 view = engine->mainCamera.getViewMatrix();
 
-    for (auto& m : engine->loadedNodes)
-    {
-        m.second->Draw(glm::mat4{1.f}, engine->mainDrawContext);                                                                                                                                 
-    }
+    // camera projection
+    glm::mat4 projection = glm::perspective(glm::radians(70.f), (float)engine->windowExtent.width / (float)engine->windowExtent.height, 10000.f, 0.1f);
 
-    for (int x = -3; x < 3; x++)
-    { 
+    // invert the Y direction on projection matrix so that we are more similar
+    // to opengl and gltf axis
+    projection[1][1] *= -1;
 
-        glm::mat4 scale = glm::scale(glm::vec3{0.2});
-        glm::mat4 translation =  glm::translate(glm::vec3{x, 1, 0});
-
-        engine->loadedNodes["Cube"]->Draw(translation * scale, engine->mainDrawContext);
-	}
-
-	engine->sceneData.view = glm::translate(glm::vec3{ 0,0,-5 });
-	// camera projection
-	engine->sceneData.proj = glm::perspective(glm::radians(70.f), (float)engine->windowExtent.width / (float)engine->windowExtent.height, 10000.f, 0.1f);
-
-	// invert the Y direction on projection matrix so that we are more similar
-	// to opengl and gltf axis
-	engine->sceneData.proj[1][1] *= -1;
-	engine->sceneData.viewproj = engine->sceneData.proj * engine->sceneData.view;
+    engine->sceneData.view = view;
+    engine->sceneData.proj = projection;
+    engine->sceneData.viewproj = projection * view;
 
 	//some default lighting parameters
 	engine->sceneData.ambientColor = glm::vec4(.1f);
