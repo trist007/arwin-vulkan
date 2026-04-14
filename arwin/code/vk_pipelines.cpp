@@ -72,6 +72,21 @@ void clear(PipelineBuilder *pipe)
 
 VkPipeline build_pipeline(PipelineBuilder *pipe, VkDevice device)
 {
+    // Force correct sType + pNext = nullptr on all state structs
+    pipe->inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    pipe->inputAssembly.pNext = nullptr;
+
+    pipe->rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    pipe->rasterizer.pNext = nullptr;
+
+    pipe->multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    pipe->multisampling.pNext = nullptr;
+
+    /*
+    pipe->depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    pipe->depthStencil.pNext = nullptr;
+    */
+
     // make viewport state from our stored viewport and scissor.
     // at the moment we wont support multiple viewports or scissors
     VkPipelineViewportStateCreateInfo viewportState = {};
@@ -95,12 +110,22 @@ VkPipeline build_pipeline(PipelineBuilder *pipe, VkDevice device)
     // completely clear VertexInputStateCreateInfo, as we have no need for it
     VkPipelineVertexInputStateCreateInfo vertexInputInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
 
+    // === CRITICAL: Create a fresh, properly initialized renderInfo ===
+    //! I added this
+    VkPipelineRenderingCreateInfo renderInfo = {};
+    renderInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    renderInfo.pNext = nullptr;
+    renderInfo.colorAttachmentCount = 1;
+    renderInfo.pColorAttachmentFormats = &pipe->colorAttachmentFormat;
+    // renderInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
     // build the actual pipeline
     // we now use all of the info structs we have been writing into into this one
     // to create the pipeline
     VkGraphicsPipelineCreateInfo pipelineInfo = { .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
     // connect the renderInfo to the pNext extension mechanism
-    pipelineInfo.pNext = &pipe->renderInfo;
+    //pipelineInfo.pNext = &pipe->renderInfo;
+    pipelineInfo.pNext = &renderInfo;
 
     pipelineInfo.stageCount = (uint32_t)pipe->shaderStages.size();
     pipelineInfo.pStages = pipe->shaderStages.data();
