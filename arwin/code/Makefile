@@ -13,7 +13,8 @@ DEFINES=-DGLM_ENABLE_EXPERIMENTAL -DSIMDJSON_DISABLE_PRETTY_PRINTING=1
 
 # Directories
 BINDIR := ../bin
-OBJDIR := $(BINDIR)
+BUILDDIR := ../build
+OBJDIR := $(BUILDDIR)
 
 # Final binary
 TARGET := $(BINDIR)/arwin
@@ -24,22 +25,25 @@ OBJS := $(patsubst %.cpp,$(OBJDIR)/%.o, $(SRCS))
 
 all: $(TARGET)
 
-$(TARGET): $(OBJS) | $(BINDIR)
+$(TARGET): $(OBJS) | $(BUILDDIR)
 	$(CC) $(CCFLAGS) $(OBJS) $(LDFLAGS) -o $@
+
+$(BUILDDIR):
+	mkdir -p $@
 
 $(BINDIR):
 	mkdir -p $@
 
 # compile .cpp to bin/%.o
-$(OBJDIR)/%.o: %.cpp | $(BINDIR)
+$(OBJDIR)/%.o: %.cpp | $(BUILDDIR)
 	$(CC) $(CCFLAGS) $(INCLUDES) $(DEFINES) -c $< -o $@
 
 # Include auto-generated dependency files (incremental builds)
 -include $(OBJS:.o=.d)
 
-
 clean:
-	rm  -rf $(BINDIR)/*
+	rm -rf $(BINDIR)/*
+	rm -rf $(BUILDDIR)/*
 #arwin: main.o vk_engine.o vk_initializers.o vk_images.o VkBootstrap.o vk_descriptors.o vk_pipelines.o vk_loader.o camera.o imgui.o imgui_demo.o imgui_draw.o imgui_tables.o imgui_widgets.o imgui_impl_sdl3.o imgui_impl_vulkan.o fastgltf.o simdjson.o base64.o
 
 #main.o: main.cpp fastgltf.o simdjson.o base64.o
