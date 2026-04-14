@@ -610,7 +610,9 @@ drawVulkanEngine(VulkanEngine *engine)
     // ! The timeout of the WaitFences call is of 1 second. It’s using nanoseconds for the wait time. If you call the function with 0 as
     // ! the timeout, you can use it to know if the GPU is still executing the command or not.
     // wait until the gpu has finished rendering the last frame.  Timeout of 1 second
-    VK_CHECK(vkWaitForFences(engine->device, 1, &frame->renderFence, true, 1000000000));
+    VK_CHECK(vkWaitForFences(engine->device, 1, &frame->renderFence, VK_TRUE, 1000000000ULL));
+    //VK_CHECK(vkWaitForFences(engine->device, 1, &frame->renderFence, true, 1000000000));
+    VK_CHECK(vkResetFences(engine->device, 1, &frame->renderFence));
 
     frame->deletionQueue.flush();
 	frame->frameDescriptors.clear_pools(engine->device);
@@ -618,7 +620,7 @@ drawVulkanEngine(VulkanEngine *engine)
     // request image from the swapchain
     uint32_t swapchainImageIndex;
     // VK_CHECK(vkAcquireNextImageKHR(engine->device, engine->swapchain, 1000000000, frame->swapchainSemaphore, 0, &swapchainImageIndex));
-    VkResult e = vkAcquireNextImageKHR(engine->device, engine->swapchain, 1000000000, frame->swapchainSemaphore, 0, &swapchainImageIndex);
+    VkResult e = vkAcquireNextImageKHR(engine->device, engine->swapchain, 1000000000ULL, frame->swapchainSemaphore, 0, &swapchainImageIndex);
     if(e == VK_ERROR_OUT_OF_DATE_KHR)
     {
         engine->resize_requested = true;
@@ -628,7 +630,7 @@ drawVulkanEngine(VulkanEngine *engine)
     engine->drawExtent.height = std::min(engine->swapchainExtent.height, engine->drawImage.imageExtent.height) * engine->renderScale;
     engine->drawExtent.width= std::min(engine->swapchainExtent.width, engine->drawImage.imageExtent.width) * engine->renderScale;
 
-    VK_CHECK(vkResetFences(engine->device, 1, &frame->renderFence));
+    //VK_CHECK(vkResetFences(engine->device, 1, &frame->renderFence));
 
     // now that we are sure that the commands finished executing, we can safely reset the command buffer to begin recording again
     // VK_CHECK(vkResetCommandBuffer(cmd, 0));
@@ -652,19 +654,6 @@ drawVulkanEngine(VulkanEngine *engine)
     // 1. Transition drawImage to COLOR_ATTACHMENT_OPTIMAL and clear it to black
     vkutil::transition_image(cmd, engine->drawImage.image, 
                             VK_IMAGE_LAYOUT_UNDEFINED, 
-                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-                            //VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-
-    VkClearValue clearBlack = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
-    VkImageSubresourceRange clearRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-    vkCmdClearColorImage(cmd, engine->drawImage.image, 
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
-                        &clearBlack.color, 1, &clearRange);
-
-    // 2. Transition depth image
-    vkutil::transition_image(cmd, engine->drawImage.image, 
-                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
     // 2. Transition depth image
@@ -672,9 +661,24 @@ drawVulkanEngine(VulkanEngine *engine)
                             VK_IMAGE_LAYOUT_UNDEFINED, 
                             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
+    VkClearValue clearColor = {{{0.1f, 0.1f, 0.1f, 1.0f}}}; // Dark gray
+    VkClearValue clearDepth = {{{ 1.0f, 0 }}};
+
+    VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(
+        engine->drawImage.imageView, &clearColor, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+    VkRenderingAttachmentInfo depthAttachment = vkinit::attachment_info(
+        engine->depthImage.imageView, &clearDepth, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+    VkRenderingInfo renderInfo = vkinit::rendering_info(engine->drawExtent, &colorAttachment, &depthAttachment);
+
+    vkCmdBeginRendering(cmd, &renderInfo);
+
     // 3. Draw the geometry (monkey)
     SDL_Log("Drawing geometry - monkey head");
     draw_geometry(engine, cmd);
+
+    vkCmdEndRendering(cmd);
 
     // 4. Transition drawImage for copy to swapchain
     vkutil::transition_image(cmd, engine->drawImage.image, 
@@ -695,7 +699,7 @@ drawVulkanEngine(VulkanEngine *engine)
                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-    draw_imgui(engine, cmd, engine->swapchainImageViews[swapchainImageIndex]);
+    //draw_imgui(engine, cmd, engine->swapchainImageViews[swapchainImageIndex]);
 
     vkutil::transition_image(cmd, engine->swapchainImages[swapchainImageIndex], 
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 
@@ -738,7 +742,7 @@ drawVulkanEngine(VulkanEngine *engine)
 
     // VK_CHECK(vkQueuePresentKHR(engine->graphicsQueue, &presentInfo));
     VkResult presentResult = vkQueuePresentKHR(engine->graphicsQueue, &presentInfo);
-    if(presentResult == VK_ERROR_OUT_OF_DATE_KHR)
+    if(presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR)
     {
         engine->resize_requested = true;
     }
@@ -789,6 +793,7 @@ runVulkanEngine(VulkanEngine *engine)
             resize_swapchain(engine);
 
         // imgui new frame
+        /*
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
@@ -814,6 +819,7 @@ runVulkanEngine(VulkanEngine *engine)
 
         // make imgui calculate internal draw structures
         ImGui::Render();
+            */
 
         drawVulkanEngine(engine);
     }
@@ -1012,22 +1018,16 @@ init_triangle_pipeline(VulkanEngine *engine)
 void
 draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 {
-    SDL_Log("draw_geometry() called - attempting to draw magenta monkey head");
+    SDL_Log("=== DRAW DEBUG ===");
+    SDL_Log("renderScale = %f", engine->renderScale);
+    SDL_Log("drawExtent = %u x %u", engine->drawExtent.width, engine->drawExtent.height);
+    SDL_Log("drawImage extent = %u x %u", engine->drawImage.imageExtent.width, engine->drawImage.imageExtent.height);
+    SDL_Log("swapchainExtent = %u x %u", engine->swapchainExtent.width, engine->swapchainExtent.height);
 
     if (engine->testMeshes.empty() || engine->testMeshes[2] == nullptr) {
         SDL_Log("ERROR: No mesh loaded!");
         return;
     }
-
-    VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(
-        engine->drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-
-    VkRenderingAttachmentInfo depthAttachment = vkinit::attachment_info(
-        engine->depthImage.imageView, nullptr, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-
-    VkRenderingInfo renderInfo = vkinit::rendering_info(engine->drawExtent, &colorAttachment, &depthAttachment);
-
-    vkCmdBeginRendering(cmd, &renderInfo);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->meshPipeline);
 
@@ -1067,7 +1067,7 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
     // VkCmdDraw(cmd, 3, 1, 0, 0);
 
     // Push constants (MVP only)
-    glm::mat4 view = glm::translate(glm::vec3{0.0f, 0.0f, -5.0f});
+    glm::mat4 view = glm::translate(glm::vec3{0.0f, 0.0f, -8.0f}); // moved camera back
     glm::mat4 projection = glm::perspective(glm::radians(70.0f),
         (float)engine->drawExtent.width / (float)engine->drawExtent.height, 0.1f, 100.0f);
     projection[1][1] *= -1.0f;
@@ -1091,8 +1091,6 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
         1,
         engine->testMeshes[2]->surfaces[0].startIndex,
         0, 0);
-
-    vkCmdEndRendering(cmd);
 
     SDL_Log("draw_geometry finished");
 
@@ -1406,12 +1404,12 @@ init_mesh_pipeline(VulkanEngine *engine)
     VkShaderModule fragShader = VK_NULL_HANDLE;
 
     if (!vkutil::load_shader_module("../shaders/colored_triangle_mesh.vert.spv", engine->device, &vertShader)) {
-            SDL_Log("ERROR: Failed to load colored_triangle_mesh_classic.vert.spv from directory: %s", SDL_GetCurrentDirectory());
+            SDL_Log("ERROR: Failed to load colored_triangle_mesh.vert.spv from directory: %s", SDL_GetCurrentDirectory());
         vkDestroyShaderModule(engine->device, vertShader, nullptr);
         return;
     }
     if (!vkutil::load_shader_module("../shaders/tex_image.frag.spv", engine->device, &fragShader)) {
-        SDL_Log("ERROR: Failed to load tex_image_classic.frag.spv from directory: %s", SDL_GetCurrentDirectory());
+        SDL_Log("ERROR: Failed to load tex_image.frag.spv from directory: %s", SDL_GetCurrentDirectory());
         vkDestroyShaderModule(engine->device, fragShader, nullptr);
         return;
     }
@@ -1444,11 +1442,22 @@ init_mesh_pipeline(VulkanEngine *engine)
 
     set_shaders(&pipelineBuilder, vertShader, fragShader);
     set_input_topology(&pipelineBuilder, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+
+    // === CRITICAL: Make sure the pipeline actually writes to the color attachment ===
+    /*
+    pipelineBuilder.colorBlendAttachment.colorWriteMask = 
+    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | 
+    VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    */
+
+    pipelineBuilder.colorBlendAttachment.blendEnable = VK_FALSE;
+
     set_polygon_mode(&pipelineBuilder, VK_POLYGON_MODE_FILL);
     set_cull_mode(&pipelineBuilder, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
     set_multisampling_none(&pipelineBuilder);
-    // disable_blending(&pipelineBuilder);        // or enable if you want alpha
-    enable_depthtest(&pipelineBuilder, true, VK_COMPARE_OP_LESS_OR_EQUAL);
+    disable_blending(&pipelineBuilder);        // or enable if you want alpha
+    //enable_depthtest(&pipelineBuilder, true, VK_COMPARE_OP_LESS_OR_EQUAL);
+    disable_depthtest(&pipelineBuilder);
 
     set_color_attachment_format(&pipelineBuilder, engine->drawImage.imageFormat);
     set_depth_format(&pipelineBuilder, engine->depthImage.imageFormat);
@@ -1632,6 +1641,7 @@ void init_default_data(VulkanEngine *engine)
 	});
 
     // testMeshes = loadGltfMeshes(this,"..\\..\\assets\\basicmesh.glb").value();
+    //engine->testMeshes = loadGltfMeshes(engine ,"../data/models/arwin8.glb").value();
     engine->testMeshes = loadGltfMeshes(engine ,"../data/assets/basicmesh.glb").value();
 
     /*
