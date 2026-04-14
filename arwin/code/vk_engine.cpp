@@ -654,6 +654,12 @@ drawVulkanEngine(VulkanEngine *engine)
     // 1. Transition drawImage to COLOR_ATTACHMENT_OPTIMAL and clear it to black
     vkutil::transition_image(cmd, engine->drawImage.image, 
                             VK_IMAGE_LAYOUT_UNDEFINED, 
+                            VK_IMAGE_LAYOUT_GENERAL);
+
+    draw_background(engine, cmd);   
+
+    vkutil::transition_image(cmd, engine->drawImage.image, 
+                            VK_IMAGE_LAYOUT_GENERAL, 
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
     // 2. Transition depth image
@@ -661,14 +667,14 @@ drawVulkanEngine(VulkanEngine *engine)
                             VK_IMAGE_LAYOUT_UNDEFINED, 
                             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
-    VkClearValue clearColor = {{{0.1f, 0.1f, 0.1f, 1.0f}}}; // Dark gray
-    VkClearValue clearDepth = {{{ 1.0f, 0 }}};
+    //VkClearValue clearColor = {{{0.1f, 0.1f, 0.1f, 1.0f}}}; // Dark gray
+    //VkClearValue clearDepth = {{{ 1.0f, 0 }}};
 
     VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(
-        engine->drawImage.imageView, &clearColor, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        engine->drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-    VkRenderingAttachmentInfo depthAttachment = vkinit::attachment_info(
-        engine->depthImage.imageView, &clearDepth, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+    VkRenderingAttachmentInfo depthAttachment = vkinit::depth_attachment_info(
+        engine->depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
     VkRenderingInfo renderInfo = vkinit::rendering_info(engine->drawExtent, &colorAttachment, &depthAttachment);
 
