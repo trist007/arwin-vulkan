@@ -1005,12 +1005,13 @@ void init_imgui(VulkanEngine *engine)
 		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
 		{ VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 } };
 
-	VkDescriptorPoolCreateInfo pool_info                = {};
-	                           pool_info.sType          = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-	                           pool_info.flags          = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-	                           pool_info.maxSets        = 1000;
-	                           pool_info.poolSizeCount  = (uint32_t)std::size(pool_sizes);
-	                           pool_info.pPoolSizes     = pool_sizes;
+	VkDescriptorPoolCreateInfo pool_info                = {
+	                           .sType          = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+	                           .flags          = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+	                           .maxSets        = 1000,
+	                           .poolSizeCount  = (uint32_t)std::size(pool_sizes),
+	                           .pPoolSizes     = pool_sizes
+    };
 
 	VkDescriptorPool imguiPool;
 	VK_CHECK(vkCreateDescriptorPool(engine->device, &pool_info, nullptr, &imguiPool));
@@ -1023,15 +1024,16 @@ void init_imgui(VulkanEngine *engine)
 	ImGui_ImplSDL3_InitForVulkan(engine->window);
 
 	// this initializes imgui for Vulkan
-	ImGui_ImplVulkan_InitInfo init_info                      = {};
-	                          init_info.Instance             = engine->instance;
-	                          init_info.PhysicalDevice       = engine->chosenGPU;
-	                          init_info.Device               = engine->device;
-	                          init_info.Queue                = engine->graphicsQueue;
-	                          init_info.DescriptorPool       = imguiPool;
-	                          init_info.MinImageCount        = 3;
-	                          init_info.ImageCount           = 3;
-	                          init_info.UseDynamicRendering  = true;
+	ImGui_ImplVulkan_InitInfo init_info                      = {
+	                          .Instance             = engine->instance,
+	                          .PhysicalDevice       = engine->chosenGPU,
+	                          .Device               = engine->device,
+	                          .Queue                = engine->graphicsQueue,
+	                          .DescriptorPool       = imguiPool,
+	                          .MinImageCount        = 3,
+	                          .ImageCount           = 3,
+	                          .UseDynamicRendering  = true,
+    };
 
     //dynamic rendering parameters for imgui to use
 	init_info.PipelineInfoMain.PipelineRenderingCreateInfo                          = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
