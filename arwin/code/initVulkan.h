@@ -1,9 +1,7 @@
 #include "vk_types.h"
 
-#define MAX_PHYSICAL_DEVICES 10
-#define MAX_PHYSICAL_DEVICE_PROPERTIES 256
+#define MAX_PHYSICAL_DEVICES 2
 #define MAX_PHYSICAL_DEVICE_EXTENSIONS 256
-#define MAX_PHYSICAL_DEVICE_FEATURES 256
 
 #define ArraySize(a) (sizeof(a) / sizeof(a[0]))
 

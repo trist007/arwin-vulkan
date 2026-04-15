@@ -154,11 +154,17 @@ init_vulkan(VulkanEngine *engine)
         abort();
     }
 
+    if(deviceCount > MAX_PHYSICAL_DEVICES)
+    {
+        SDL_Log("Warning: Too many physical devices (%u), limiting to %d",
+            deviceCount, MAX_PHYSICAL_DEVICES);
+        deviceCount = MAX_PHYSICAL_DEVICES;
+    }
+
     SDL_Log("Number of device found: %d", deviceCount);
 
-    // Simple safe allocation (fixed stack array is better, but this works)
-    std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
-    VK_CHECK(vkEnumeratePhysicalDevices(engine->instance, &deviceCount, physicalDevices.data()));
+    VkPhysicalDevice physicalDevices[MAX_PHYSICAL_DEVICES] = { VK_NULL_HANDLE };
+    VK_CHECK(vkEnumeratePhysicalDevices(engine->instance, &deviceCount, physicalDevices));
 
     DeviceInformation deviceInfo = {};
 
