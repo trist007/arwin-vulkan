@@ -3,9 +3,6 @@
 #include "vk_initializers.h"
 #include "vk_images.h"
 
-// bootstrap library
-#include "VKBootstrap.h"
-
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
 #include "vk_pipelines.h"
@@ -16,6 +13,8 @@
 #include "imgui_impl_vulkan.h"
 
 #include <glm/gtx/transform.hpp>
+
+#include "initVulkan.h"
 
 constexpr bool bUseValidationLayers  = true;
 
@@ -75,99 +74,133 @@ initVulkanEngine(VulkanEngine *engine)
     engine->mainCamera.yaw = 0; 
 }
 
-void print_devices(const vkb::Instance& vkb_inst)
-{
-    vkb::PhysicalDeviceSelector selector { vkb_inst };
-
-    auto result = selector.select_device_names();
-
-    if(!result)
-    {
-        SDL_Log("Error selecting devices: %s", result.error().message().c_str());
-    }
-
-    const std::vector<std::string>& devices = result.value();
-
-    SDL_Log("Available Vulkan Physical Devices (%zu):", devices.size());
-
-    for (size_t i = 0; i < devices.size(); ++i) {
-        SDL_Log(" %zu. %s", i + 1, devices[i].c_str());
-    }
-}
-
 void
 init_vulkan(VulkanEngine *engine)
 {
-    vkb::InstanceBuilder builder;
-
-    // make the vulkan instance, with basic debug features
-    auto inst_ret  = builder.set_app_name("Vulkan Tutorial")
-        .request_validation_layers(bUseValidationLayers)
-        .use_default_debug_messenger()
-        .require_api_version(1, 3, 0)
-        .build();
-
-    if (!inst_ret) {
-        SDL_Log("Failed to create Vulkan instance: %s", inst_ret.error().message().c_str());
-        abort();
+        if (!engine || !engine->window) {
+        SDL_Log("Error: Invalid engine or window passed to init_vulkan\n");
+        return;
     }
 
-    SDL_Log("Vulkan Instance created");
+    VkResult result;
 
-    vkb::Instance vkb_inst  = inst_ret.value();
+    // ------------------- 1. Create Vulkan Instance -------------------
+    uint32_t instanceVersion = 0;
+    vkEnumerateInstanceVersion(&instanceVersion);
 
-    // grab the instance
-    engine->instance        = vkb_inst.instance;
-    engine->debugMessenger  = vkb_inst.debug_messenger;
+    SDL_Log("Vulkan loader supports version %d.%d.%d", 
+            VK_VERSION_MAJOR(instanceVersion),
+            VK_VERSION_MINOR(instanceVersion),
+            VK_VERSION_PATCH(instanceVersion));
 
-    SDL_Vulkan_CreateSurface(engine->window, engine->instance, 0, &engine->surface);
-    /*
-    {
+    const char* instanceExtensions[] = {
+        VK_KHR_SURFACE_EXTENSION_NAME,
+        VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+        "VK_KHR_xlib_surface",
+#if defined(VK_USE_PLATFORM_XCB_KHR)
+        VK_KHR_XCB_SURFACE_EXTENSION_NAME,
+#elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
+        VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+#endif
+        // Add debug utils if validation layers are enabled
+    };
+
+    uint32_t enabledLayerCount = 0;
+    const char* enabledLayers[1] = { "VK_LAYER_KHRONOS_validation" };
+
+    if (bUseValidationLayers) {
+        enabledLayerCount = 1;
+    }
+
+    VkApplicationInfo appInfo = {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = "SDL3 Vulkan glTF Renderer",
+        .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+        .pEngineName = "Custom Engine",
+        .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+        .apiVersion = VK_API_VERSION_1_3
+    };
+
+    VkInstanceCreateInfo instanceCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pApplicationInfo = &appInfo,
+        .enabledLayerCount = enabledLayerCount,
+        .ppEnabledLayerNames = enabledLayers,
+        .enabledExtensionCount = sizeof(instanceExtensions) / sizeof(instanceExtensions[0]),
+        .ppEnabledExtensionNames = instanceExtensions
+    };
+
+    result = vkCreateInstance(&instanceCreateInfo, NULL, &engine->instance);
+    if (result != VK_SUCCESS) {
+        SDL_Log("Failed to create Vulkan instance: %d\n", result);
+        return;
+    }
+
+    SDL_Log("Vulkan Instance created successfully");
+
+    // ------------------- 2. Create SDL Surface -------------------
+    if (!SDL_Vulkan_CreateSurface(engine->window, engine->instance, nullptr, &engine->surface)) {
         SDL_Log("Failed to create Vulkan surface: %s", SDL_GetError());
+        return;
+    }
+
+    SDL_Log("SDL Vulkan Surface created");
+
+    // ------------------- 3. Select Best Physical Device + Queue Family -------------------
+    uint32_t deviceCount = getDeviceCount(engine->instance, engine->surface);
+    if(deviceCount == 0)
+    {
+        SDL_Log("Error: no physical devices found");
         abort();
     }
-    */
 
-    SDL_Log("Created a SDL Surface");
+    SDL_Log("Number of device found: %d", deviceCount);
 
-    //vulkan 1.3 features
-	VkPhysicalDeviceVulkan13Features features{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
-	features.dynamicRendering  = true;
-	features.synchronization2  = true;
+    // Simple safe allocation (fixed stack array is better, but this works)
+    std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
+    VK_CHECK(vkEnumeratePhysicalDevices(engine->instance, &deviceCount, physicalDevices.data()));
 
-	//vulkan 1.2 features
-	VkPhysicalDeviceVulkan12Features features12{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
-	features12.bufferDeviceAddress  = true;
-	features12.descriptorIndexing   = true;
+    DeviceInformation deviceInfo = {};
 
-	//use vkbootstrap to select a gpu. 
-	//We want a gpu that can write to the SDL surface and supports vulkan 1.3 with the correct features
-	vkb::PhysicalDeviceSelector selector{ vkb_inst };
-	vkb::PhysicalDevice physicalDevice  = selector
-		.set_minimum_version(1, 3)
-		.set_required_features_13(features)
-		.set_required_features_12(features12)
-		.set_surface(engine->surface)
-		.select()
-		.value();
+    VkPhysicalDevice chosenDevice = VK_NULL_HANDLE;
+    uint32_t bestQueueFamily = UINT32_MAX;
+    int bestScore = -1;
 
-    // === Print available physical devices ===
-    //print_devices(vkb_inst);        // ← Add this line
+    for(uint32_t i = 0; i < deviceCount; ++i)
+    {
+        int score = evalDevice(engine->instance, engine->surface, physicalDevices[i], &deviceInfo);
 
-	//create the final vulkan device
-	vkb::DeviceBuilder deviceBuilder{ physicalDevice };
+        SDL_Log("device: %s score = %d", deviceInfo.name, score);
 
-    SDL_Log("Selected a Vulkan Physical Device: %s", physicalDevice.name.c_str());
+        if (score > bestScore) {
+            bestScore = score;
+            chosenDevice = physicalDevices[i];
+            bestQueueFamily = deviceInfo.queueFamilyIndex;   // make sure evalDevice fills this!
+        }
+    }
 
-	vkb::Device vkbDevice  = deviceBuilder.build().value();
+    if (chosenDevice == VK_NULL_HANDLE) {
+        SDL_Log("Error: Could not select a suitable physical device");
+        abort();
+    }
 
-	// Get the VkDevice handle used in the rest of a vulkan application
-	engine->device     = vkbDevice.device;
-	engine->chosenGPU  = physicalDevice.physical_device;
+    engine->chosenGPU = chosenDevice;
+    SDL_Log("Selected GPU: %s", deviceInfo.name);   // better than printing garbage
 
-    // use VkBootstrap to get a Graphics queue
-    engine->graphicsQueue        = vkbDevice.get_queue(vkb::QueueType::graphics).value();
-    engine->graphicsQueueFamily  = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+    uint32_t numExt = enableExtCount(&deviceInfo);
+
+    // ------------------- 4. Create Logical Device -------------------
+    if (!createLogicalDevice(engine->chosenGPU, bestQueueFamily, &engine->device, numExt, &deviceInfo)) {
+        SDL_Log("Failed to create logical device!\n");
+        return;
+    }
+
+    // ------------------- 5. Retrieve Graphics Queue -------------------
+    engine->graphicsQueueFamily = bestQueueFamily;
+    vkGetDeviceQueue(engine->device, bestQueueFamily, 0, &engine->graphicsQueue);
+
+    SDL_Log("Vulkan initialization completed successfully!");
+    SDL_Log("Graphics Queue Family Index: %u", bestQueueFamily);
 
     // initialize the memory allocator
     VmaAllocatorCreateInfo allocatorInfo                 = {};
@@ -504,34 +537,93 @@ void init_pipelines(VulkanEngine *engine)
 void
 create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height)
 {
-	vkb::SwapchainBuilder swapchainBuilder{ engine->chosenGPU, engine->device, engine->surface };
+    VkSurfaceCapabilitiesKHR surfaceCapabilities;
+    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(engine->chosenGPU, engine->surface, &surfaceCapabilities));
 
-	engine->swapchainImageFormat  = VK_FORMAT_B8G8R8A8_UNORM;
+    // 2. Choose swapchain format (B8G8R8A8 UNORM + SRGB is standard)
+    engine->swapchainImageFormat = VK_FORMAT_B8G8R8A8_UNORM;
 
-	vkb::Swapchain vkbSwapchain  = swapchainBuilder
-		//.use_default_format_selection()
-		.set_desired_format(VkSurfaceFormatKHR{ .format = engine->swapchainImageFormat, .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR })
-        //use vsync present mode
-        //! NOTE: trist007: here we specify the SwapChain Mode VK_PRESENT_MODE_FIFO_KHR does a Hard VSync
-		.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR) 
-		.set_desired_extent(width, height)
-		.add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-		.build()
-		.value();
+    // 3. Choose present mode (FIFO = vsync, good default)
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
 
-	engine->swapchainExtent  = vkbSwapchain.extent;
-	engine->swapchain        = vkbSwapchain.swapchain;
-
-    //copy images into fixed array
-    std::vector<VkImage>     images      = vkbSwapchain.get_images().value();
-    std::vector<VkImageView> imageViews  = vkbSwapchain.get_image_views().value();
-
-    engine->swapchainImageCount  = (uint32_t)images.size();
-    for (uint32_t i = 0; i < engine->swapchainImageCount; ++i) {
-        engine->swapchainImages[i]      = images[i];
-        engine->swapchainImageViews[i]  = imageViews[i];
+    // 4. Choose image count (triple buffering is nice)
+    uint32_t imageCount = surfaceCapabilities.minImageCount + 1;
+    if (surfaceCapabilities.maxImageCount > 0 && imageCount > surfaceCapabilities.maxImageCount) {
+        imageCount = surfaceCapabilities.maxImageCount;
     }
 
+    // 5. Choose extent (clamp to surface capabilities)
+    VkExtent2D swapchainExtent = surfaceCapabilities.currentExtent;
+    if (swapchainExtent.width == UINT32_MAX || swapchainExtent.height == UINT32_MAX) {
+        swapchainExtent.width = width;
+        swapchainExtent.height = height;
+    }
+
+    // Clamp to allowed range
+    swapchainExtent.width  = std::clamp(swapchainExtent.width,  
+                                        surfaceCapabilities.minImageExtent.width, 
+                                        surfaceCapabilities.maxImageExtent.width);
+    swapchainExtent.height = std::clamp(swapchainExtent.height, 
+                                        surfaceCapabilities.minImageExtent.height, 
+                                        surfaceCapabilities.maxImageExtent.height);
+
+    // 6. Create the swapchain
+    VkSwapchainCreateInfoKHR createInfo = {
+        .sType                 = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .surface               = engine->surface,
+        .minImageCount         = imageCount,
+        .imageFormat           = engine->swapchainImageFormat,
+        .imageColorSpace       = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+        .imageExtent           = swapchainExtent,
+        .imageArrayLayers      = 1,
+        .imageUsage            = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .imageSharingMode      = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices   = nullptr,
+        .preTransform          = surfaceCapabilities.currentTransform,
+        .compositeAlpha        = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        .presentMode           = presentMode,
+        .clipped               = VK_TRUE,
+        .oldSwapchain          = VK_NULL_HANDLE
+    };
+
+    VK_CHECK(vkCreateSwapchainKHR(engine->device, &createInfo, nullptr, &engine->swapchain));
+
+    engine->swapchainExtent = swapchainExtent;
+
+    // 7. Get swapchain images
+    uint32_t swapchainImageCount = 0;
+    vkGetSwapchainImagesKHR(engine->device, engine->swapchain, &swapchainImageCount, nullptr);
+
+    std::vector<VkImage> images(swapchainImageCount);
+    vkGetSwapchainImagesKHR(engine->device, engine->swapchain, &swapchainImageCount, images.data());
+
+    engine->swapchainImageCount = swapchainImageCount;
+
+    for (uint32_t i = 0; i < swapchainImageCount; ++i) {
+        engine->swapchainImages[i] = images[i];
+
+        // Create image view for each swapchain image
+        VkImageViewCreateInfo viewInfo = {
+            .sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image      = images[i],
+            .viewType   = VK_IMAGE_VIEW_TYPE_2D,
+            .format     = engine->swapchainImageFormat,
+            .components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                            VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
+            .subresourceRange = {
+                .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel   = 0,
+                .levelCount     = 1,
+                .baseArrayLayer = 0,
+                .layerCount     = 1
+            }
+        };
+
+        VK_CHECK(vkCreateImageView(engine->device, &viewInfo, nullptr, &engine->swapchainImageViews[i]));
+    }
+
+    SDL_Log("Swapchain created successfully with %u images", swapchainImageCount);
 }
 
 void
@@ -581,7 +673,7 @@ cleanupVulkanEngine(VulkanEngine *engine)
         vkDestroySurfaceKHR(engine->instance, engine->surface, 0);
         vkDestroyDevice(engine->device, 0);
 
-        vkb::destroy_debug_utils_messenger(engine->instance, engine->debugMessenger);
+        //vkb::destroy_debug_utils_messenger(engine->instance, engine->debugMessenger);
         vkDestroyInstance(engine->instance, 0);
         SDL_DestroyWindow(engine->window);
 
@@ -593,8 +685,6 @@ cleanupVulkanEngine(VulkanEngine *engine)
 void
 drawVulkanEngine(VulkanEngine *engine)
 {
-    SDL_Log("=== draw_geometry() called ===");
-
     if (engine->testMeshes.empty()) {
         SDL_Log("ERROR: testMeshes is empty!");
         return;
@@ -604,10 +694,6 @@ drawVulkanEngine(VulkanEngine *engine)
         SDL_Log("ERROR: testMeshes[2] is null!");
         return;
     }
-
-    SDL_Log("Drawing mesh: %s with %u indices", 
-            engine->testMeshes[2]->name.c_str(), 
-            engine->testMeshes[2]->surfaces[0].count);
 
     FrameData *frame  = getCurrentFrame(engine);
 
@@ -689,7 +775,6 @@ drawVulkanEngine(VulkanEngine *engine)
     vkCmdBeginRendering(cmd, &renderInfo);
 
     // 3. Draw the geometry (monkey)
-    SDL_Log("Drawing geometry - monkey head");
     draw_geometry(engine, cmd);
 
     vkCmdEndRendering(cmd);
@@ -1031,12 +1116,6 @@ init_triangle_pipeline(VulkanEngine *engine)
 void
 draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 {
-    SDL_Log("=== DRAW DEBUG ===");
-    SDL_Log("renderScale = %f", engine->renderScale);
-    SDL_Log("drawExtent = %u x %u", engine->drawExtent.width, engine->drawExtent.height);
-    SDL_Log("drawImage extent = %u x %u", engine->drawImage.imageExtent.width, engine->drawImage.imageExtent.height);
-    SDL_Log("swapchainExtent = %u x %u", engine->swapchainExtent.width, engine->swapchainExtent.height);
-
     if (engine->testMeshes.empty() || engine->testMeshes[2] == nullptr) {
         SDL_Log("ERROR: No mesh loaded!");
         return;
@@ -1094,18 +1173,12 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 
     vkCmdBindIndexBuffer(cmd, engine->testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-    SDL_Log("Mesh pipeline bound, about to draw indexed");
-    SDL_Log("About to issue drawIndexed: %u indices", 
-        engine->testMeshes[2]->surfaces[0].count);
-
     // Draw the monkey head
     vkCmdDrawIndexed(cmd,
         engine->testMeshes[2]->surfaces[0].count,
         1,
         engine->testMeshes[2]->surfaces[0].startIndex,
         0, 0);
-
-    SDL_Log("draw_geometry finished");
 
 	//allocate a new uniform buffer for the scene data
 	AllocatedBuffer gpuSceneDataBuffer = create_buffer(engine, sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
@@ -1138,7 +1211,7 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
 		pushConstants.worldMatrix = draw.transform;
 		vkCmdPushConstants(cmd,draw.material->pipeline->layout ,VK_SHADER_STAGE_VERTEX_BIT,0, sizeof(GPUDrawPushConstants), &pushConstants);
 
-		vkCmdDrawIndexed(cmd,draw.indexCount,1,draw.firstIndex,0,0);
+		vkCmdDrawIndexed(cmd, draw.indexCount, 1, draw.firstIndex, 0, 0);
 	}
 }
 

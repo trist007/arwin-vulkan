@@ -73,6 +73,7 @@ void clear(PipelineBuilder *pipe)
 VkPipeline build_pipeline(PipelineBuilder *pipe, VkDevice device)
 {
     // Force correct sType + pNext = nullptr on all state structs
+    /*
     pipe->inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     pipe->inputAssembly.pNext = nullptr;
 
@@ -82,10 +83,22 @@ VkPipeline build_pipeline(PipelineBuilder *pipe, VkDevice device)
     pipe->multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     pipe->multisampling.pNext = nullptr;
 
-    /*
     pipe->depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     pipe->depthStencil.pNext = nullptr;
     */
+
+    pipe->rasterizer.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    pipe->rasterizer.pNext                   = nullptr;
+    pipe->rasterizer.depthClampEnable        = VK_FALSE;
+    pipe->rasterizer.rasterizerDiscardEnable = VK_FALSE;
+    pipe->rasterizer.polygonMode             = VK_POLYGON_MODE_FILL;
+    pipe->rasterizer.cullMode                = VK_CULL_MODE_NONE;
+    pipe->rasterizer.frontFace               = VK_FRONT_FACE_CLOCKWISE;
+    pipe->rasterizer.depthBiasEnable         = VK_FALSE;               // Important
+    pipe->rasterizer.depthBiasConstantFactor = 0.0f;
+    pipe->rasterizer.depthBiasClamp          = 0.0f;                   // ← Explicitly 0.0f
+    pipe->rasterizer.depthBiasSlopeFactor    = 0.0f;
+    pipe->rasterizer.lineWidth               = 1.0f;
 
     // make viewport state from our stored viewport and scissor.
     // at the moment we wont support multiple viewports or scissors
@@ -117,6 +130,7 @@ VkPipeline build_pipeline(PipelineBuilder *pipe, VkDevice device)
     renderInfo.pNext = nullptr;
     renderInfo.colorAttachmentCount = 1;
     renderInfo.pColorAttachmentFormats = &pipe->colorAttachmentFormat;
+    renderInfo.depthAttachmentFormat = pipe->depthFormat;
     // renderInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
     // build the actual pipeline
@@ -181,14 +195,17 @@ void set_shaders(PipelineBuilder *pipe, VkShaderModule vertexShader, VkShaderMod
 
 void set_input_topology(PipelineBuilder *pipe, VkPrimitiveTopology topology)
 {
+    pipe->inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    pipe->inputAssembly.pNext = nullptr;
+    pipe->inputAssembly.flags = 0;           // Important
     pipe->inputAssembly.topology = topology;
-    // we are not going to use primitive restart on the entire tutorial so leave
-    // it on false
     pipe->inputAssembly.primitiveRestartEnable = VK_FALSE;
 }
 
 void set_polygon_mode(PipelineBuilder *pipe, VkPolygonMode mode)
 {
+    pipe->rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    pipe->rasterizer.pNext = nullptr;
     pipe->rasterizer.polygonMode = mode;
     pipe->rasterizer.lineWidth = 1.f;
 }
@@ -201,6 +218,8 @@ void set_cull_mode(PipelineBuilder *pipe, VkCullModeFlags cullMode, VkFrontFace 
 
 void set_multisampling_none(PipelineBuilder *pipe)
 {
+    pipe->multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    pipe->multisampling.pNext = nullptr;
     pipe->multisampling.sampleShadingEnable = VK_FALSE;
     // multisampling defaulted to no multisampling (1 sample per pixel)
     pipe->multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;

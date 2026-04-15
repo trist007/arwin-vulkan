@@ -19,7 +19,8 @@ struct PipelineBuilder
     VkPipelineLayout pipelineLayout;
     VkPipelineDepthStencilStateCreateInfo depthStencil;
     VkPipelineRenderingCreateInfo renderInfo;
-    VkFormat colorAttachmentFormat;
+    VkFormat colorAttachmentFormat = VK_FORMAT_UNDEFINED;
+    VkFormat depthFormat = VK_FORMAT_UNDEFINED;
 };
 
 VkPipeline build_pipeline(PipelineBuilder *pipe, VkDevice device);
