@@ -22,7 +22,7 @@ struct DescriptorAllocator
 
     VkDescriptorPool pool;
 
-    void init_pool(VkDevice device, uint32_t maxSets, std::span<PoolSizeRatio> poolRatios);
+    void init_pool(VkDevice device, uint32_t maxSets, PoolSizeRatio *poolRatios, uint32_t ratioCount);
     void clear_descriptors(VkDevice device);
     void destroy_pool(VkDevice device);
 
@@ -37,13 +37,13 @@ struct DescriptorAllocatorGrowable
         float ratio;
     };
 
-    void init_pool(VkDevice device, uint32_t initialSets, std::span<PoolSizeRatio> poolRatios);
+    void init_pool(VkDevice device, uint32_t initialSets, PoolSizeRatio *poolRatios, uint32_t ratioCount);
     void clear_pools(VkDevice device);
     void destroy_pools(VkDevice device);
 
     VkDescriptorSet allocate(VkDevice device, VkDescriptorSetLayout layout, void *pNext = nullptr);
     VkDescriptorPool get_pool(VkDevice device);
-    VkDescriptorPool create_pool(VkDevice device, uint32_t setCount, std::span<PoolSizeRatio> poolRatios);
+    VkDescriptorPool create_pool(VkDevice device, uint32_t setCount, PoolSizeRatio *poolRatios, uint32_t ratioCount);
 
     std::vector<PoolSizeRatio> ratios;
     std::vector<VkDescriptorPool> fullPools;

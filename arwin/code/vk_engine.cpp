@@ -362,13 +362,22 @@ init_sync_structures(VulkanEngine *engine)
 void init_descriptors(VulkanEngine *engine)
 {
     // create a descriptor pool that will hold 10 sets with 1 image each
+    /*
     std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> sizes  = 
     {
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }
     };
+    */
 
-    engine->globalDescriptorAllocator.init_pool(engine->device, 10, sizes);
+    DescriptorAllocatorGrowable::PoolSizeRatio globalSizes[2] = {
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }
+    };
+
+    uint32_t sizeCount = 2;
+
+    engine->globalDescriptorAllocator.init_pool(engine->device, 10, globalSizes, 2);
 
     // make the descriptor set layout for our compute draw
     {
@@ -431,7 +440,7 @@ void init_descriptors(VulkanEngine *engine)
     
 	for (int i = 0; i < FRAME_OVERLAP; i++) {
 		// create a descriptor pool
-		std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> frame_sizes = { 
+		DescriptorAllocatorGrowable::PoolSizeRatio frame_sizes[4] = { 
 			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 3 },
 			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 },
 			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3 },
@@ -439,7 +448,7 @@ void init_descriptors(VulkanEngine *engine)
 		};
 
 		engine->frames[i].frameDescriptors = DescriptorAllocatorGrowable{};
-		engine->frames[i].frameDescriptors.init_pool(engine->device, 1000, frame_sizes);
+		engine->frames[i].frameDescriptors.init_pool(engine->device, 1000, frame_sizes, 4);
 	
 		engine->mainDeletionQueue.push_function([&, i]() {
 			engine->frames[i].frameDescriptors.destroy_pools(engine->device);
