@@ -47,12 +47,12 @@ struct DeletionQueue
 
 struct GPUSceneData
 {
-    glm::mat4 view;
-    glm::mat4 proj;
-    glm::mat4 viewproj;
-    glm::vec4 ambientColor;
-    glm::vec4 sunlightDirection;  // w for sun power
-    glm::vec4 sunlightColor;
+    HMM_Mat4 view;
+    HMM_Mat4 proj;
+    HMM_Mat4 viewproj;
+    HMM_Vec4 ambientColor;
+    HMM_Vec4 sunlightDirection;  // w for sun power
+    HMM_Vec4 sunlightColor;
 };
 
 struct FrameData
@@ -70,10 +70,10 @@ struct FrameData
 
 struct ComputePushConstants
 {
-    glm::vec4 data1;
-    glm::vec4 data2;
-    glm::vec4 data3;
-    glm::vec4 data4;
+    HMM_Vec4 data1;
+    HMM_Vec4 data2;
+    HMM_Vec4 data3;
+    HMM_Vec4 data4;
 };
 
 struct ComputeEffect
@@ -95,10 +95,10 @@ struct GLTFMetallic_Roughness {
 	VkDescriptorSetLayout materialLayout;
 
 	struct MaterialConstants {
-		glm::vec4 colorFactors;
-		glm::vec4 metal_rough_factors;
+		HMM_Vec4 colorFactors;
+		HMM_Vec4 metal_rough_factors;
 		//padding, we need it anyway for uniform buffers
-		glm::vec4 extra[14];
+		HMM_Vec4 extra[14];
 	};
 
 	struct MaterialResources {
@@ -126,7 +126,7 @@ struct RenderObject
 
     MaterialInstance *material;
 
-    glm::mat4 transform;
+    HMM_Mat4 transform;
     VkDeviceAddress vertexBufferAddress;
 };
 
@@ -231,7 +231,7 @@ struct MeshNode : public Node {
 
 	std::shared_ptr<MeshAsset> mesh;
 
-	virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) override;
+	virtual void Draw(const HMM_Mat4& topMatrix, DrawContext& ctx) override;
 };
 
 // singleton for pointer retrieval

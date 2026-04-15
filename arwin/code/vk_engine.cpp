@@ -12,7 +12,7 @@
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_vulkan.h"
 
-#include <glm/gtx/transform.hpp>
+#include "HandmadeMath.h"
 
 #include "initVulkan.h"
 
@@ -67,8 +67,8 @@ initVulkanEngine(VulkanEngine *engine)
     // everything went fine
     engine->isInitialized  = true;
 
-    engine->mainCamera.velocity = glm::vec3(0.f);
-    engine->mainCamera.position = glm::vec3(0, 0, 5);
+    engine->mainCamera.velocity = {0.0f, 0.0f, 0.0f};
+    engine->mainCamera.position = {0.0f, 0.0f, 5.0f};
 
     engine->mainCamera.pitch = 0;
     engine->mainCamera.yaw = 0; 
@@ -503,8 +503,8 @@ void init_background_pipelines(VulkanEngine *engine)
     gradient.data = {};
 
     //default colors
-    gradient.data.data1 = glm::vec4{ 1, 0, 0, 1 };
-    gradient.data.data2 = glm::vec4{ 0, 0, 1, 1 };
+    gradient.data.data1 = HMM_Vec4{ 1, 0, 0, 1 };
+    gradient.data.data2 = HMM_Vec4{ 0, 0, 1, 1 };
 
     VK_CHECK(vkCreateComputePipelines(engine->device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &gradient.pipeline));
 
@@ -516,7 +516,7 @@ void init_background_pipelines(VulkanEngine *engine)
     sky.name = "sky";
     sky.data = {};
     //default sky parameters
-    sky.data.data1 = glm::vec4{ 0.1, 0.2, 0.4 ,0.97 };
+    sky.data.data1 = HMM_Vec4{ 0.1, 0.2, 0.4 ,0.97 };
 
     VK_CHECK(vkCreateComputePipelines(engine->device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &sky.pipeline));
 
@@ -1176,11 +1176,14 @@ draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd)
     // VkCmdDraw(cmd, 3, 1, 0, 0);
 
     // Push constants (MVP only)
-    glm::mat4 view = glm::translate(glm::vec3{0.0f, 0.0f, -8.0f}); // moved camera back
-    glm::mat4 projection = glm::perspective(glm::radians(70.0f),
-        (float)engine->drawExtent.width / (float)engine->drawExtent.height, 0.1f, 100.0f);
-    projection[1][1] *= -1.0f;
+    HMM_Mat4 view = HMM_Translate(HMM_V3(0.0f, 0.0f, -8.0f));
+    float aspectRatio = (float)engine->windowExtent.width / (float)engine->windowExtent.height;
 
+    HMM_Mat4 projection = HMM_Perspective_LH_NO(HMM_ToRad(70.0f), aspectRatio, 0.1f, 10000.0f);
+
+    // Flip Y axis for Vulkan
+    projection.Columns[1].Y = -projection.Columns[1].Y;
+    
     GPUDrawPushConstants push_constants = {};
     push_constants.worldMatrix = projection * view;
     push_constants.vertexBuffer = engine->testMeshes[2]->meshBuffers.vertexBufferAddress;
@@ -1569,33 +1572,30 @@ void init_default_data(VulkanEngine *engine)
 		destroy_buffer(engine, engine->rectangle.indexBuffer);
 		destroy_buffer(engine, engine->rectangle.vertexBuffer);
 	});
-    */
 
 	//3 default textures, white, grey, black. 1 pixel each
-	uint32_t white = glm::packUnorm4x8(glm::vec4(1, 1, 1, 1));
-	engine->whiteImage = create_image(engine, (void*)&white, VkExtent3D{ 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM,
-		VK_IMAGE_USAGE_SAMPLED_BIT);
+    uint32_t white   = HMM_PackRGBA(255, 255, 255, 255);
+    uint32_t grey    = HMM_PackRGBA(168, 168, 168, 255);     // approx 0.66f
+    uint32_t black   = HMM_PackRGBA(0,   0,   0,   255);
+    uint32_t magenta = HMM_PackRGBA(255, 0,   255, 255);
+    // Checkerboard (16x16)
+    uint32_t pixels[16 * 16];
 
-	uint32_t grey = glm::packUnorm4x8(glm::vec4(0.66f, 0.66f, 0.66f, 1));
-	engine->greyImage = create_image(engine, (void*)&grey, VkExtent3D{ 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM,
-		VK_IMAGE_USAGE_SAMPLED_BIT);
+    for (int y = 0; y < 16; y++)
+    {
+        for (int x = 0; x < 16; x++)
+        {
+            pixels[y * 16 + x] = ((x % 2) ^ (y % 2)) ? magenta : black;
+        }
+    }
 
-	uint32_t black = glm::packUnorm4x8(glm::vec4(0, 0, 0, 0));
-	engine->blackImage = create_image(engine, (void*)&black, VkExtent3D{ 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM,
-		VK_IMAGE_USAGE_SAMPLED_BIT);
+    engine->errorCheckerboardImage = create_image(engine, pixels, 
+                                                VkExtent3D{16, 16, 1}, 
+                                                VK_FORMAT_R8G8B8A8_UNORM,
+                                                VK_IMAGE_USAGE_SAMPLED_BIT);
 
-	//checkerboard image
-	uint32_t magenta = glm::packUnorm4x8(glm::vec4(1, 0, 1, 1));
-	std::array<uint32_t, 16 *16 > pixels; //for 16x16 checkerboard texture
-	for (int x = 0; x < 16; x++) {
-		for (int y = 0; y < 16; y++) {
-			pixels[y*16 + x] = ((x % 2) ^ (y % 2)) ? magenta : black;
-		}
-	}
 
-	engine->errorCheckerboardImage = create_image(engine, pixels.data(), VkExtent3D{16, 16, 1}, VK_FORMAT_R8G8B8A8_UNORM,
-		VK_IMAGE_USAGE_SAMPLED_BIT);
-
+    */
 	VkSamplerCreateInfo sampl = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
 
 	sampl.magFilter = VK_FILTER_NEAREST;
@@ -1617,10 +1617,6 @@ void init_default_data(VulkanEngine *engine)
 		destroy_image(engine, engine->errorCheckerboardImage);
 	});
 
-    // testMeshes = loadGltfMeshes(this,"..\\..\\assets\\basicmesh.glb").value();
-    //engine->testMeshes = loadGltfMeshes(engine ,"../data/models/arwin8.glb").value();
-    //engine->testMeshes = loadGltfMeshes(engine ,"../data/assets/basicmesh.glb").value();
-
 	GLTFMetallic_Roughness::MaterialResources materialResources;
 	//default the material textures
 	materialResources.colorImage = engine->whiteImage;
@@ -1633,8 +1629,8 @@ void init_default_data(VulkanEngine *engine)
 
 	//write the buffer
 	GLTFMetallic_Roughness::MaterialConstants* sceneUniformData = (GLTFMetallic_Roughness::MaterialConstants*)materialConstants.allocation->GetMappedData();
-	sceneUniformData->colorFactors = glm::vec4{1,1,1,1};
-	sceneUniformData->metal_rough_factors = glm::vec4{1,0.5,0,0};
+	sceneUniformData->colorFactors = HMM_Vec4{1,1,1,1};
+	sceneUniformData->metal_rough_factors = HMM_Vec4{1,0.5,0,0};
 
 	engine->mainDeletionQueue.push_function([=]() {
 		destroy_buffer(engine, materialConstants);
@@ -1645,14 +1641,14 @@ void init_default_data(VulkanEngine *engine)
 
 	engine->defaultData = engine->metalRoughMaterial.write_material(engine->device, MaterialPass::MainColor, materialResources, engine->globalDescriptorAllocator);
 
-    engine->testMeshes = loadGltfMeshes(engine ,"../data/assets/basicmesh.glb").value();
+    engine->testMeshes = loadGltfMeshes(engine ,"../data/assets/basicmesh.glb");
 
     for (auto& m : engine->testMeshes) {
         std::shared_ptr<MeshNode> newNode = std::make_shared<MeshNode>();
         newNode->mesh = m;
 
-        newNode->localTransform = glm::mat4{ 1.f };
-        newNode->worldTransform = glm::mat4{ 1.f };
+        newNode->localTransform = HMM_Mat4{ 1.f };
+        newNode->worldTransform = HMM_Mat4{ 1.f };
 
         for (auto& s : newNode->mesh->surfaces) {
             s.material = std::make_shared<GLTFMaterial>(engine->defaultData);
@@ -1851,9 +1847,9 @@ MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, Materia
 	return matData;
 }
 
-void MeshNode::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
+void MeshNode::Draw(const HMM_Mat4& topMatrix, DrawContext& ctx)
 {
-	glm::mat4 nodeMatrix = topMatrix * worldTransform;
+	HMM_Mat4 nodeMatrix = topMatrix * worldTransform;
 
 	for (auto& s : mesh->surfaces) {
 		RenderObject def;
@@ -1876,11 +1872,17 @@ void update_scene(VulkanEngine *engine)
 {
     engine->mainCamera.update();
 
-    glm::mat4 view = engine->mainCamera.getViewMatrix();
+    HMM_Mat4 view = engine->mainCamera.getViewMatrix();
 
     // camera projection
-    glm::mat4 projection = glm::perspective(glm::radians(70.f), (float)engine->windowExtent.width / (float)engine->windowExtent.height, 10000.f, 0.1f);
+    float aspectRatio = (float)engine->windowExtent.width / (float)engine->windowExtent.height;
 
+    HMM_Mat4 projection = HMM_Perspective_LH_NO(
+        HMM_ToRad(70.0f),   // FOV in radians
+        aspectRatio,            // aspect ratio (width/height)
+        0.1f,                   // near plane
+        10000.0f                // far plane
+    );
     // invert the Y direction on projection matrix so that we are more similar
     // to opengl and gltf axis
     projection[1][1] *= -1;
@@ -1890,7 +1892,7 @@ void update_scene(VulkanEngine *engine)
     engine->sceneData.viewproj = projection * view;
 
 	//some default lighting parameters
-	engine->sceneData.ambientColor = glm::vec4(.1f);
-	engine->sceneData.sunlightColor = glm::vec4(1.f);
-	engine->sceneData.sunlightDirection = glm::vec4(0,1,0.5,1.f);
+    engine->sceneData.ambientColor = HMM_V4(0.1f, 0.1f, 0.1f, 1.0f);
+    engine->sceneData.sunlightColor = HMM_V4(1.0f, 1.0f, 1.0f, 1.0f);
+    engine->sceneData.sunlightDirection = HMM_V4(0.0f, 1.0f, 0.5f, 1.0f);
 }

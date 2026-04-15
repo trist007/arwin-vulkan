@@ -13,15 +13,9 @@
 #include <vulkan/vk_enum_string_helper.h>
 #include "vk_mem_alloc.h"
 
-//#include <fmt/core.h> //<format> already included in c++20
-//#include <format>     // I'm going to use SDL_Log()
-
-// #include <HandmadeMath.h>
-#include <glm/gtx/transform.hpp>
+#include "HandmadeMath.h"
 #include <SDL3/SDL.h>
 
-//#include <glm/mat4x4.hpp>
-//#include <glm/vec4.hpp>
 
 /*
 #ifdef DEBUG
@@ -76,7 +70,7 @@ struct DrawContext;
 
 class IRenderable
 {
-    virtual void Draw(const glm::mat4 &topMatrix, DrawContext &ctx) = 0;
+    virtual void Draw(const HMM_Mat4 &topMatrix, DrawContext &ctx) = 0;
 };
 
 // implementation of a drawable scene node.
@@ -88,10 +82,10 @@ struct Node : public IRenderable {
     std::weak_ptr<Node> parent;
     std::vector<std::shared_ptr<Node>> children;
 
-    glm::mat4 localTransform;
-    glm::mat4 worldTransform;
+    HMM_Mat4 localTransform;
+    HMM_Mat4 worldTransform;
 
-    void refreshTransform(const glm::mat4& parentMatrix)
+    void refreshTransform(const HMM_Mat4& parentMatrix)
     {
         worldTransform = parentMatrix * localTransform;
         for (auto c : children) {
@@ -99,7 +93,7 @@ struct Node : public IRenderable {
         }
     }
 
-    virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx)
+    virtual void Draw(const HMM_Mat4& topMatrix, DrawContext& ctx)
     {
         // draw children
         for (auto& c : children) {
@@ -117,11 +111,11 @@ struct VertexInputDescription
 // Mesh Buffers on GPU
 struct Vertex
 {
-    glm::vec3 position;
+    HMM_Vec3 position;
     float uv_x;
-    glm::vec3 normal;
+    HMM_Vec3 normal;
     float uv_y;
-    glm::vec4 color;
+    HMM_Vec4 color;
 
     static VertexInputDescription get_vertex_description();
 
@@ -138,6 +132,6 @@ struct GPUMeshBuffers
 // push constants for our mesh object draws
 struct GPUDrawPushConstants
 {
-    glm::mat4 worldMatrix;
+    HMM_Mat4 worldMatrix;
     VkDeviceAddress vertexBuffer;
 };

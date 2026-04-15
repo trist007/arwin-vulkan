@@ -30,4 +30,5 @@ struct MeshAsset
 };
 
 struct VulkanEngine;
-std::optional<std::vector<std::shared_ptr<MeshAsset>>> loadGltfMeshes(VulkanEngine *engine, std::filesystem::path filePath);
+
+std::vector<std::shared_ptr<MeshAsset>> loadGltfMeshes(VulkanEngine* engine, const char* path);

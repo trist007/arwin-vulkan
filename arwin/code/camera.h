@@ -1,19 +1,17 @@
-#include "vk_types.h"
 #include <SDL3/SDL_events.h>
+#include "HandmadeMath.h"
 
-class Camera {
-public:
-    glm::vec3 velocity;
-    glm::vec3 position;
-    // vertical rotation
-    float pitch { 0.f };
-    // horizontal rotation
-    float yaw { 0.f };
+struct Camera {
+    HMM_Vec3 position;
+    HMM_Vec3 velocity;
 
-    glm::mat4 getViewMatrix();
-    glm::mat4 getRotationMatrix();
-
-    void processSDLEvent(SDL_Event& e);
+    float pitch = 0.0f;
+    float yaw = 0.0f;
 
     void update();
+    void processSDLEvent(SDL_Event& e);
+
+    HMM_Mat4 getViewMatrix();
+    HMM_Mat4 getRotationMatrix();
+
 };

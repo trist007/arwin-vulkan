@@ -1,52 +1,63 @@
 #include "camera.h"
-#include <glm/gtx/transform.hpp>
-#include <glm/gtx/quaternion.hpp>
+#define HANDMADE_MATH_IMPLEMENTATION
+#include "HandmadeMath.h"
+#include <SDL3/SDL.h>
 
 void Camera::update()
 {
-    glm::mat4 cameraRotation = getRotationMatrix();
-    position += glm::vec3(cameraRotation * glm::vec4(velocity * 0.5f, 0.f));
+    HMM_Mat4 cameraRotation = getRotationMatrix();
+
+    HMM_Vec4 localMove = HMM_V4(velocity.X * 0.5f, 
+                                velocity.Y * 0.5f, 
+                                velocity.Z * 0.5f, 0.0f);
+
+    HMM_Vec4 worldMove = HMM_MulM4V4(cameraRotation, localMove);
+
+    position = HMM_AddV3(position, HMM_V3(worldMove.X, worldMove.Y, worldMove.Z));
 }
 
 void Camera::processSDLEvent(SDL_Event& e)
 {
-    if (e.type == SDL_EVENT_KEY_DOWN) {
-        if (e.key.scancode == SDL_SCANCODE_W) { velocity.z = -1; }
-        if (e.key.scancode == SDL_SCANCODE_S) { velocity.z = 1; }
-        if (e.key.scancode == SDL_SCANCODE_A) { velocity.x = -1; }
-        if (e.key.scancode == SDL_SCANCODE_D) { velocity.x = 1; }
+    if (e.type == SDL_EVENT_KEY_DOWN)
+    {
+        if (e.key.scancode == SDL_SCANCODE_W) velocity.Z = -1.0f;
+        if (e.key.scancode == SDL_SCANCODE_S) velocity.Z =  1.0f;
+        if (e.key.scancode == SDL_SCANCODE_A) velocity.X = -1.0f;
+        if (e.key.scancode == SDL_SCANCODE_D) velocity.X =  1.0f;
     }
 
-    if (e.type == SDL_EVENT_KEY_UP) {
-        if (e.key.scancode == SDL_SCANCODE_W) { velocity.z = 0; }
-        if (e.key.scancode == SDL_SCANCODE_S) { velocity.z = 0; }
-        if (e.key.scancode == SDL_SCANCODE_A) { velocity.x = 0; }
-        if (e.key.scancode == SDL_SCANCODE_D) { velocity.x = 0; }
+    if (e.type == SDL_EVENT_KEY_UP)
+    {
+        if (e.key.scancode == SDL_SCANCODE_W) velocity.Z = 0.0f;
+        if (e.key.scancode == SDL_SCANCODE_S) velocity.Z = 0.0f;
+        if (e.key.scancode == SDL_SCANCODE_A) velocity.X = 0.0f;
+        if (e.key.scancode == SDL_SCANCODE_D) velocity.X = 0.0f;
     }
 
-    if (e.type == SDL_EVENT_MOUSE_MOTION) {
-        yaw += (float)e.motion.xrel / 200.f;
-        pitch -= (float)e.motion.yrel / 200.f;
+    if (e.type == SDL_EVENT_MOUSE_MOTION)
+    {
+        yaw   += (float)e.motion.xrel / 200.0f;
+        pitch -= (float)e.motion.yrel / 200.0f;
+
+        if (pitch >  1.5f) pitch =  1.5f;
+        if (pitch < -1.5f) pitch = -1.5f;
     }
 }
 
-glm::mat4 Camera::getViewMatrix()
+HMM_Mat4 Camera::getRotationMatrix()
 {
-    // to create a correct model view, we need to move the world in opposite
-    // direction to the camera
-    //  so we will create the camera model matrix and invert
-    glm::mat4 cameraTranslation = glm::translate(glm::mat4(1.f), position);
-    glm::mat4 cameraRotation = getRotationMatrix();
-    return glm::inverse(cameraTranslation * cameraRotation);
+    HMM_Quat pitchQuat = HMM_QFromAxisAngle_LH(HMM_V3(1.0f, 0.0f, 0.0f), pitch);
+    HMM_Quat yawQuat   = HMM_QFromAxisAngle_LH(HMM_V3(0.0f, 1.0f, 0.0f), -yaw);
+
+    HMM_Quat cameraQuat = HMM_MulQ(yawQuat, pitchQuat);
+
+    return HMM_QToM4(cameraQuat);
 }
 
-glm::mat4 Camera::getRotationMatrix()
+HMM_Mat4 Camera::getViewMatrix()
 {
-    // fairly typical FPS style camera. we join the pitch and yaw rotations into
-    // the final rotation matrix
+    HMM_Mat4 rotation    = getRotationMatrix();
+    HMM_Mat4 translation = HMM_Translate(HMM_V3(-position.X, -position.Y, -position.Z));
 
-    glm::quat pitchRotation = glm::angleAxis(pitch, glm::vec3 { 1.f, 0.f, 0.f });
-    glm::quat yawRotation = glm::angleAxis(yaw, glm::vec3 { 0.f, -1.f, 0.f });
-
-    return glm::toMat4(yawRotation) * glm::toMat4(pitchRotation);
+    return HMM_MulM4(translation, rotation);
 }
