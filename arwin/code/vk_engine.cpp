@@ -16,6 +16,8 @@
 
 #include "initVulkan.h"
 
+#define MAX_SWAPCHAIN_IMAGES 4
+
 constexpr bool bUseValidationLayers  = true;
 
 static VulkanEngine *s_engine  = 0;
@@ -93,17 +95,10 @@ init_vulkan(VulkanEngine *engine)
             VK_VERSION_MINOR(instanceVersion),
             VK_VERSION_PATCH(instanceVersion));
 
-    const char* instanceExtensions[] = {
-        VK_KHR_SURFACE_EXTENSION_NAME,
-        VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
-        "VK_KHR_xlib_surface",
-#if defined(VK_USE_PLATFORM_XCB_KHR)
-        VK_KHR_XCB_SURFACE_EXTENSION_NAME,
-#elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
-        VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
-#endif
-        // Add debug utils if validation layers are enabled
-    };
+
+    uint32_t instanceExtensionsCount{0};
+    const char* const* newinstanceExtensions{ SDL_Vulkan_GetInstanceExtensions(&instanceExtensionsCount) };
+    //char const* const* newinstanceExtensions{ SDL_Vulkan_GetInstanceExtensions(&instanceExtensionsCount) };
 
     uint32_t enabledLayerCount = 0;
     const char* enabledLayers[1] = { "VK_LAYER_KHRONOS_validation" };
@@ -126,17 +121,14 @@ init_vulkan(VulkanEngine *engine)
         .pApplicationInfo = &appInfo,
         .enabledLayerCount = enabledLayerCount,
         .ppEnabledLayerNames = enabledLayers,
-        .enabledExtensionCount = sizeof(instanceExtensions) / sizeof(instanceExtensions[0]),
-        .ppEnabledExtensionNames = instanceExtensions
+        .enabledExtensionCount = instanceExtensionsCount,
+        //.enabledExtensionCount = sizeof(instanceExtensions) / sizeof(instanceExtensions[0]),
+        .ppEnabledExtensionNames = newinstanceExtensions
     };
 
-    result = vkCreateInstance(&instanceCreateInfo, NULL, &engine->instance);
-    if (result != VK_SUCCESS) {
-        SDL_Log("Failed to create Vulkan instance: %d\n", result);
-        return;
-    }
+    VK_CHECK(vkCreateInstance(&instanceCreateInfo, NULL, &engine->instance));
 
-    SDL_Log("Vulkan Instance created successfully");
+    SDL_Log("Vulkan Instance created");
 
     // ------------------- 2. Create SDL Surface -------------------
     if (!SDL_Vulkan_CreateSurface(engine->window, engine->instance, nullptr, &engine->surface)) {
@@ -147,7 +139,8 @@ init_vulkan(VulkanEngine *engine)
     SDL_Log("SDL Vulkan Surface created");
 
     // ------------------- 3. Select Best Physical Device + Queue Family -------------------
-    uint32_t deviceCount = getDeviceCount(engine->instance, engine->surface);
+    uint32_t deviceCount = 0;
+    VK_CHECK(vkEnumeratePhysicalDevices(engine->instance, &deviceCount, nullptr));
     if(deviceCount == 0)
     {
         SDL_Log("Error: no physical devices found");
@@ -556,9 +549,11 @@ create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height)
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(engine->chosenGPU, engine->surface, &surfaceCapabilities));
 
     // 2. Choose swapchain format (B8G8R8A8 UNORM + SRGB is standard)
-    engine->swapchainImageFormat = VK_FORMAT_B8G8R8A8_UNORM;
+    // VK_FORMAT_B8G8R8A8_UNORM or VK_FORMAT_B8G8R8A8_SRGB
+    engine->swapchainImageFormat = VK_FORMAT_B8G8R8A8_SRGB;
 
     // 3. Choose present mode (FIFO = vsync, good default)
+    // VK_PRESENT_MODE_FIFO_KHR is a v-synced mode and the only mode guaranteed to be available everywhere.
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
 
     // 4. Choose image count (triple buffering is nice)
@@ -609,11 +604,27 @@ create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height)
     // 7. Get swapchain images
     uint32_t swapchainImageCount = 0;
     vkGetSwapchainImagesKHR(engine->device, engine->swapchain, &swapchainImageCount, nullptr);
+    SDL_Log("swapchainImageCount: %d", swapchainImageCount);
 
-    std::vector<VkImage> images(swapchainImageCount);
-    vkGetSwapchainImagesKHR(engine->device, engine->swapchain, &swapchainImageCount, images.data());
+    VkImage images[MAX_SWAPCHAIN_IMAGES];
+    vkGetSwapchainImagesKHR(engine->device, engine->swapchain, &swapchainImageCount, images);
 
     engine->swapchainImageCount = swapchainImageCount;
+
+    // check depth format
+    std::vector<VkFormat> depthFormatList{ VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT };
+    VkFormat depthFormat{ VK_FORMAT_UNDEFINED };
+    for (VkFormat& format : depthFormatList) {
+        VkFormatProperties2 formatProperties{ .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2 };
+        vkGetPhysicalDeviceFormatProperties2(engine->chosenGPU, format, &formatProperties);
+        if (formatProperties.formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+            depthFormat = format;
+            break;
+        }
+    }
+
+    SDL_Log("Selected depth format: %d", (int)depthFormat);
+
 
     for (uint32_t i = 0; i < swapchainImageCount; ++i) {
         engine->swapchainImages[i] = images[i];
@@ -623,6 +634,7 @@ create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height)
             .sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .image      = images[i],
             .viewType   = VK_IMAGE_VIEW_TYPE_2D,
+            //.format     = depthFormat,
             .format     = engine->swapchainImageFormat,
             .components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
                             VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },

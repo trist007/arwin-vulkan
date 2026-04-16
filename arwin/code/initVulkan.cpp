@@ -49,6 +49,24 @@ bool createLogicalDevice(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIn
 
     float queuePriority = 1.0f;
 
+    VkPhysicalDeviceVulkan12Features enabledVk12Features{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .descriptorIndexing = true,
+        .shaderSampledImageArrayNonUniformIndexing = true,
+        .descriptorBindingVariableDescriptorCount = true,
+        .runtimeDescriptorArray = true,
+        .bufferDeviceAddress = true
+    };
+    VkPhysicalDeviceVulkan13Features enabledVk13Features{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+        .pNext = &enabledVk12Features,
+        .synchronization2 = true,
+        .dynamicRendering = true,
+    };
+    VkPhysicalDeviceFeatures enabledVk10Features{
+        .samplerAnisotropy = VK_TRUE
+    };
+
     const char* extensions[1] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
     VkDeviceQueueCreateInfo queueCreateInfo = {
@@ -60,12 +78,12 @@ bool createLogicalDevice(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIn
 
     VkDeviceCreateInfo createInfo = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = NULL,          // ← Important!
+        .pNext = &enabledVk13Features,          // ← Important!
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &queueCreateInfo,
         .enabledExtensionCount = 1,
         .ppEnabledExtensionNames = extensions,
-        .pEnabledFeatures = NULL                     // Can stay NULL if using pNext chain
+        .pEnabledFeatures = &enabledVk10Features                     // Can stay NULL if using pNext chain
     };
 
         /*
