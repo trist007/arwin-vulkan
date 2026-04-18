@@ -9,5 +9,6 @@ int main(int argc,  char *argv[])
 
     runVulkanEngine(&engine);
 
-    cleanupVulkanEngine(&engine);
+    howtoCleanupVulkanEngine(&engine);
+    //cleanupVulkanEngine(&engine);
 }
