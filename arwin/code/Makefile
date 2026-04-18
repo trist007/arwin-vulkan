@@ -8,7 +8,7 @@
 CC := clang++
 CCFLAGS :=-std=c++20 -MMD -w -g
 VULKAN_SDK_PATH := /home/trist007/dev/1.4.341.1/x86_64
-INCLUDES := $(VULKAN_SDK_PATH)/include
+INCLUDES := -I$(VULKAN_SDK_PATH)/include
 LIBDIR := -L$(VULKAN_SDK_PATH)/lib \
 	-L.
 LDFLAGS := -lvulkan -lSDL3 -lm -lslang-compiler -lktx \
