@@ -1,0 +1,10 @@
+CompileFlags:
+  Add: [-std=c++20]   # or -std=gnu++20 if you prefer
+
+# Optional: make clangd more accurate with your build
+Diagnostics:
+  UnusedIncludes: Strict
+
+Style:
+  IndentWidth: 4
+  UseTab: Never
