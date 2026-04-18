@@ -11,7 +11,7 @@ VULKAN_SDK_PATH := /home/trist007/dev/1.4.341.1/x86_64
 INCLUDES := -I$(VULKAN_SDK_PATH)/include
 LIBDIR := -L$(VULKAN_SDK_PATH)/lib \
 	-L.
-LDFLAGS := -lvulkan -lSDL3 -lm -lslang-compiler -lktx \
+LDFLAGS := -lvulkan -lSDL3 -lm -lslang -lslang-compiler -lktx \
 	-Wl,-rpath,$(VULKAN_SDK_PATH)/lib
 DEFINES :=-DSIMDJSON_DISABLE_PRETTY_PRINTING=1
 
