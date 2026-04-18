@@ -9,6 +9,7 @@
 #include <memory>    // for std::shared_ptr
 #include <string>
 
+
 struct GLTFMaterial
 {
     MaterialInstance data;

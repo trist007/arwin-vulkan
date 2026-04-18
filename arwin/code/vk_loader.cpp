@@ -1,3 +1,5 @@
+
+
 #include "stb_image.h"
 #include <iostream>
 #include "vk_loader.h"
@@ -10,6 +12,7 @@
 
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
+
 
 std::vector<std::shared_ptr<MeshAsset>> loadGltfMeshes(VulkanEngine* engine, const char* path)
 {

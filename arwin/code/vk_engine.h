@@ -4,8 +4,13 @@
 #include "vk_loader.h"
 #include "camera.h"
 #include <SDL3/SDL.h>
+#include "tiny_obj_loader.h"
+#include "slang/slang.h"
+#include "slang/slang-com-ptr.h"
+
 
 #define MAX_SWAPCHAIN_IMAGES 8
+#define MAX_TEXTURES 3
 
 // ! NOTE: trist007: deque is a double ended Queue that allows fast insertion and deletion at both
 // ! front and back ends, unlike a regular array which is only fast at the back
@@ -55,6 +60,22 @@ struct GPUSceneData
     HMM_Vec4 sunlightColor;
 };
 
+struct ShaderData
+{
+    HMM_Mat4 projection;
+    HMM_Mat4 view;
+    HMM_Mat4 model[3];
+    HMM_Vec4 lightPos{ 0.0f, -10.0f, 10.0f, 0.0f };
+};
+
+struct ShaderDataBuffer
+{
+    VmaAllocation allocation{ VK_NULL_HANDLE };
+    VmaAllocationInfo allocationInfo{};
+    VkBuffer buffer{ VK_NULL_HANDLE };
+    VkDeviceAddress deviceAddress{};
+};
+
 struct FrameData
 {
     VkSemaphore swapchainSemaphore;
@@ -66,6 +87,10 @@ struct FrameData
 
     DeletionQueue deletionQueue;
     DescriptorAllocatorGrowable frameDescriptors;
+
+    // howtoVulkan
+    ShaderDataBuffer shaderDataBuffers;
+    VkCommandBuffer commandBuffers{VK_NULL_HANDLE};
 };
 
 struct ComputePushConstants
@@ -84,6 +109,11 @@ struct ComputeEffect
     VkPipelineLayout layout;
 
     ComputePushConstants data;
+};
+
+struct ivec2
+{
+    int x, y;
 };
 
 struct VulkanEngine;
@@ -136,6 +166,96 @@ struct MeshAsset;
 
 struct DrawContext {
 	std::vector<RenderObject> OpaqueSurfaces;
+};
+
+/*
+struct HowtoVulkanEngine {
+    // === Core Vulkan handles ===
+    VkInstance instance{ VK_NULL_HANDLE };
+    VkPhysicalDevice physicalDevice{ VK_NULL_HANDLE };
+    VkDevice device{ VK_NULL_HANDLE };
+    VkQueue graphicsQueue{ VK_NULL_HANDLE };
+    uint32_t graphicsQueueFamily{ 0 };
+
+    VkSurfaceKHR surface{ VK_NULL_HANDLE };
+    VkSwapchainKHR swapchain{ VK_NULL_HANDLE };
+
+    // === VMA ===
+    VmaAllocator allocator{ VK_NULL_HANDLE };
+
+    // === Swapchain related ===
+    std::vector<VkImage> swapchainImages;
+    std::vector<VkImageView> swapchainImageViews;
+    VkFormat swapchainImageFormat{ VK_FORMAT_UNDEFINED };
+    VkExtent2D swapchainExtent{};
+
+    // === Depth buffer ===
+    VkImage depthImage{ VK_NULL_HANDLE };
+    VmaAllocation depthImageAllocation{ VK_NULL_HANDLE };
+    VkImageView depthImageView{ VK_NULL_HANDLE };
+    VkFormat depthFormat{ VK_FORMAT_UNDEFINED };
+
+    // === Command buffers & sync ===
+    VkCommandPool commandPool{ VK_NULL_HANDLE };
+    std::array<VkCommandBuffer, maxFramesInFlight> commandBuffers{};
+    std::array<VkFence, maxFramesInFlight> fences{};
+    std::array<VkSemaphore, maxFramesInFlight> imageAvailableSemaphores{};   // renamed from presentSemaphores
+    std::vector<VkSemaphore> renderFinishedSemaphores{};                     // one per swapchain image
+
+    bool framebufferResized{ false };   // for resize handling
+
+    // === Mesh data (your suzanne.obj) ===
+    VkBuffer vertexBuffer{ VK_NULL_HANDLE };      // combined vertex + index buffer
+    VmaAllocation vertexBufferAllocation{ VK_NULL_HANDLE };
+    VkDeviceSize indexOffset{ 0 };                // byte offset where indices start in the buffer
+    uint32_t indexCount{ 0 };
+
+    // === Uniform / Shader data buffers (per-frame) ===
+    struct ShaderDataBuffer {
+        VkBuffer buffer{ VK_NULL_HANDLE };
+        VmaAllocation allocation{ VK_NULL_HANDLE };
+        VmaAllocationInfo allocationInfo{};
+        VkDeviceAddress deviceAddress{ 0 };
+    };
+    std::array<ShaderDataBuffer, maxFramesInFlight> shaderDataBuffers{};
+
+    // === Textures ===
+    struct Texture {
+        VkImage image{ VK_NULL_HANDLE };
+        VmaAllocation allocation{ VK_NULL_HANDLE };
+        VkImageView view{ VK_NULL_HANDLE };
+        VkSampler sampler{ VK_NULL_HANDLE };
+    };
+    std::array<Texture, 3> textures{};
+
+    // === Descriptors ===
+    VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
+    VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };   // renamed from descriptorSetLayoutTex
+    VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };               // renamed from descriptorSetTex
+
+    // === Pipeline ===
+    VkPipeline pipeline{ VK_NULL_HANDLE };
+    VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
+
+    // === Shader compiler (Slang) ===
+    Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
+
+    // === Other useful state ===
+    SDL_Window* window{ nullptr };
+    glm::ivec2 windowSize{ 1280, 720 };
+    glm::vec3 cameraPosition{ 0.0f, 0.0f, -6.0f };
+    glm::vec3 objectRotations[3]{};
+    uint32_t selectedObject{ 1 };
+
+    bool isInitialized{ false };
+};
+*/
+struct Texture
+{
+    VmaAllocation allocation;
+    VkImage image;
+    VkImageView view;
+    VkSampler sampler;
 };
 
 struct VulkanEngine
@@ -225,6 +345,32 @@ struct VulkanEngine
     std::unordered_map<std::string, std::shared_ptr<Node>> loadedNodes;
 
     Camera mainCamera;
+
+
+    // HowtoVulkan
+    VkCommandBuffer commandBuffers;
+    ShaderDataBuffer shaderDataBuffers;
+    VkBuffer vBuffer = VK_NULL_HANDLE;
+    VmaAllocation vBufferAllocation = VK_NULL_HANDLE;
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+
+    VkSemaphore renderSemaphores[MAX_SWAPCHAIN_IMAGES];
+    VkCommandPool commandPool; 
+
+    Texture textures[MAX_TEXTURES];
+    uint32_t textureCount = MAX_TEXTURES;
+
+    VkDescriptorSetLayout descriptorSetLayoutTex = VK_NULL_HANDLE;
+    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    VkDescriptorSet descriptorSetTex = VK_NULL_HANDLE;
+    HMM_Vec3 camPos{0.0f, 0.0f, -6.0f};
+    HMM_Vec3 objectRotations[3]{};
+    ivec2 windowSize();
+
+    // slang
+    Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
 };
 
 struct MeshNode : public Node {
@@ -271,6 +417,7 @@ void initVulkanEngine(VulkanEngine *engine);
 void cleanupVulkanEngine(VulkanEngine *engine);
 
 void drawVulkanEngine(VulkanEngine *engine);
+void drawHowtoVulkanEngine(VulkanEngine *engine);
 void runVulkanEngine(VulkanEngine *engine);
 FrameData *getCurrentFrame(VulkanEngine *engine);
 
@@ -284,3 +431,5 @@ void init_default_data(VulkanEngine *engine);
 AllocatedImage create_image(VulkanEngine *engine, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 AllocatedImage create_image(VulkanEngine *engine, void *data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 void destroy_image(VulkanEngine *engine, const AllocatedImage &img);
+
+bool howtoVulkan(VulkanEngine *engine);

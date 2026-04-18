@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <iostream>
 #include <span>
 #include <array>
 #include <functional>
@@ -15,6 +16,9 @@
 
 #include "HandmadeMath.h"
 #include <SDL3/SDL.h>
+
+
+#define ArraySize(arr) (uint32_t)(sizeof(arr) / sizeof(arr[0]))
 
 
 /*
@@ -112,10 +116,10 @@ struct VertexInputDescription
 struct Vertex
 {
     HMM_Vec3 position;
-    float uv_x;
     HMM_Vec3 normal;
-    float uv_y;
-    HMM_Vec4 color;
+    HMM_Vec2 texcoord;
+
+    HMM_Vec2 color;
 
     static VertexInputDescription get_vertex_description();
 
