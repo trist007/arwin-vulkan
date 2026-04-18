@@ -5,9 +5,9 @@
 #include "camera.h"
 #include <SDL3/SDL.h>
 #include "tiny_obj_loader.h"
+
 #include "slang/slang.h"
 #include "slang/slang-com-ptr.h"
-
 
 #define MAX_SWAPCHAIN_IMAGES 8
 #define MAX_TEXTURES 3
@@ -65,7 +65,9 @@ struct ShaderData
     HMM_Mat4 projection;
     HMM_Mat4 view;
     HMM_Mat4 model[3];
+
     HMM_Vec4 lightPos{ 0.0f, -10.0f, 10.0f, 0.0f };
+    uint32_t selected;
 };
 
 struct ShaderDataBuffer
@@ -82,14 +84,14 @@ struct FrameData
     VkSemaphore renderSemaphore;
     VkFence renderFence;
 
-    VkCommandPool commandPool;
     VkCommandBuffer mainCommandBuffer;
 
     DeletionQueue deletionQueue;
     DescriptorAllocatorGrowable frameDescriptors;
 
     // howtoVulkan
-    ShaderDataBuffer shaderDataBuffers;
+    ShaderDataBuffer shaderDataBuffers; // GPU buffer
+    ShaderData shaderData;              // CPU data
     VkCommandBuffer commandBuffers{VK_NULL_HANDLE};
 };
 
@@ -261,6 +263,7 @@ struct Texture
 struct VulkanEngine
 {
     // general
+    /*
     bool isInitialized;
     bool stop_rendering;
     int frameNumber;
@@ -273,13 +276,9 @@ struct VulkanEngine
     VkSurfaceKHR surface;
     VkDevice device;
     VkPhysicalDevice chosenGPU;
-    VkSwapchainKHR swapchain;
     VkFormat swapchainImageFormat;
-    VkImage swapchainImages[MAX_SWAPCHAIN_IMAGES];
-    VkImageView swapchainImageViews[MAX_SWAPCHAIN_IMAGES];
     uint32_t swapchainImageCount;
     VkExtent2D swapchainExtent;
-    FrameData frames[FRAME_OVERLAP];
 
     // queues
     VkQueue graphicsQueue;
@@ -345,32 +344,88 @@ struct VulkanEngine
     std::unordered_map<std::string, std::shared_ptr<Node>> loadedNodes;
 
     Camera mainCamera;
+    */
 
+    //! NOTE(trist007): HowtoVulkan
 
-    // HowtoVulkan
-    VkCommandBuffer commandBuffers;
-    ShaderDataBuffer shaderDataBuffers;
+    bool isInitialized;
+    bool stop_rendering;
+    bool resize_requested;
+    Camera mainCamera;
+
+    // vulkan core
+    VkInstance instance;
+    VkDevice device;
+    VkSwapchainKHR swapchain;
+    VkExtent2D swapchainExtent{};
+    VkExtent2D windowExtent;
+    SDL_Window *window;
+    VkSurfaceKHR surface{ VK_NULL_HANDLE };
+    VkPhysicalDevice chosenGPU;
+    uint32_t swapchainImageCount;
+
+    // queues
+    VkQueue graphicsQueue;
+    uint32_t graphicsQueueFamily;
+    DeletionQueue deletionQueue;
+    DeletionQueue mainDeletionQueue;
+
+    // VMA
+    VmaAllocator allocator;
     VkBuffer vBuffer = VK_NULL_HANDLE;
     VmaAllocation vBufferAllocation = VK_NULL_HANDLE;
+    VkDeviceSize vertexBufferSize = 0;
+    VkDeviceSize indexBufferOffset = 0;
+
+    // pools
+    VkCommandPool commandPool{ VK_NULL_HANDLE };
+
+    // frames
+    FrameData frames[FRAME_OVERLAP];
+    uint32_t imageIndex{};
+    uint32_t frameIndex{};
+
+    // tiny obj loader
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
 
-    VkSemaphore renderSemaphores[MAX_SWAPCHAIN_IMAGES];
-    VkCommandPool commandPool; 
-
+    // textures
     Texture textures[MAX_TEXTURES];
     uint32_t textureCount = MAX_TEXTURES;
+    
+    // meshes
+    uint32_t indexCount = 0;
 
+    // descriptors
     VkDescriptorSetLayout descriptorSetLayoutTex = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkDescriptorSet descriptorSetTex = VK_NULL_HANDLE;
+
+    // model
     HMM_Vec3 camPos{0.0f, 0.0f, -6.0f};
     HMM_Vec3 objectRotations[3]{};
     ivec2 windowSize();
 
     // slang
     Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
+    VkShaderModule shaderModule{};
+
+    // swapchain
+    VkImage swapchainImages[MAX_SWAPCHAIN_IMAGES];
+    VkImageView swapchainImageViews[MAX_SWAPCHAIN_IMAGES];
+    //VkImage depthImage{ VK_NULL_HANDLE };
+    AllocatedImage depthImage{ VK_NULL_HANDLE };
+    VmaAllocation depthImageAllocation{ VK_NULL_HANDLE };
+    AllocatedImage drawImage;
+    VkFormat swapchainImageFormat;
+    VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+    VkImageView depthImageView{ VK_NULL_HANDLE };
+
+    // pipeline
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+
 };
 
 struct MeshNode : public Node {
@@ -415,6 +470,7 @@ void update_scene(VulkanEngine *engine);
 
 void initVulkanEngine(VulkanEngine *engine);
 void cleanupVulkanEngine(VulkanEngine *engine);
+void howtoCleanupVulkanEngine(VulkanEngine *engine);
 
 void drawVulkanEngine(VulkanEngine *engine);
 void drawHowtoVulkanEngine(VulkanEngine *engine);
