@@ -5,11 +5,15 @@
 # -Wno<warning-name> - suppress warning
 # -Werror=>warning-name> - treat as error
 # -g - debugging symbols
-CC=clang++
-CCFLAGS=-std=c++20 -MMD -w -g
-INCLUDE=-I.
-LDFLAGS=-lvulkan -lSDL3 -lm
-DEFINES=-DSIMDJSON_DISABLE_PRETTY_PRINTING=1
+CC := clang++
+CCFLAGS :=-std=c++20 -MMD -w -g
+VULKAN_SDK_PATH := /home/trist007/dev/1.4.341.1/x86_64
+INCLUDES := $(VULKAN_SDK_PATH)/include
+LIBDIR := -L$(VULKAN_SDK_PATH)/lib \
+	-L.
+LDFLAGS := -lvulkan -lSDL3 -lm -lslang-compiler -lktx \
+	-Wl,-rpath,$(VULKAN_SDK_PATH)/lib
+DEFINES :=-DSIMDJSON_DISABLE_PRETTY_PRINTING=1
 
 # Directories
 BINDIR := ../bin
@@ -25,8 +29,8 @@ OBJS := $(patsubst %.cpp,$(OBJDIR)/%.o, $(SRCS))
 
 all: $(TARGET)
 
-$(TARGET): $(OBJS) | $(BUILDDIR)
-	$(CC) $(CCFLAGS) $(OBJS) $(LDFLAGS) -o $@
+$(TARGET): $(OBJS) | $(BINDIR) $(BUILDDIR)
+	$(CC) $(CCFLAGS) $(OBJS) $(LIBDIR) $(LDFLAGS) -o $@
 
 $(BUILDDIR):
 	mkdir -p $@
@@ -44,16 +48,3 @@ $(OBJDIR)/%.o: %.cpp | $(BUILDDIR)
 clean:
 	rm -rf $(BINDIR)/*
 	rm -rf $(BUILDDIR)/*
-#arwin: main.o vk_engine.o vk_initializers.o vk_images.o VkBootstrap.o vk_descriptors.o vk_pipelines.o vk_loader.o camera.o imgui.o imgui_demo.o imgui_draw.o imgui_tables.o imgui_widgets.o imgui_impl_sdl3.o imgui_impl_vulkan.o fastgltf.o simdjson.o base64.o
-
-#main.o: main.cpp fastgltf.o simdjson.o base64.o
-
-#fastgltf.o: fastgltf.cpp
-#simdjson.o: simdjson.cpp
-#base64.o: base64.cpp
-
-#main.o: main.cpp vk_engine.h
-#vk_engine.o: vk_engine.cpp vk_engine.h
-
-#%.o: %.cpp
-#	$(CC) $(CCFLAGS) $(INCLUDE) $(DEFINES) -c -g $<
