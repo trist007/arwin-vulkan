@@ -294,123 +294,134 @@ void init_swapchain(VulkanEngine *engine) {
   });
 }
 
-void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height) {
-  VkSurfaceCapabilitiesKHR surfaceCapabilities;
-  VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-      engine->chosenGPU, engine->surface, &surfaceCapabilities));
+void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height)
+{
+    VkSurfaceCapabilitiesKHR surfaceCapabilities;
+    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+        engine->chosenGPU, engine->surface, &surfaceCapabilities));
 
-  // 2. Choose swapchain format (B8G8R8A8 UNORM + SRGB is standard)
-  // VK_FORMAT_B8G8R8A8_UNORM or VK_FORMAT_B8G8R8A8_SRGB
-  engine->swapchainImageFormat = VK_FORMAT_B8G8R8A8_SRGB;
+    // 2. Choose swapchain format (B8G8R8A8 UNORM + SRGB is standard)
+    // VK_FORMAT_B8G8R8A8_UNORM or VK_FORMAT_B8G8R8A8_SRGB
+    engine->swapchainImageFormat = VK_FORMAT_B8G8R8A8_SRGB;
 
-  // 3. Choose present mode (FIFO = vsync, good default)
-  // VK_PRESENT_MODE_FIFO_KHR is a v-synced mode and the only mode guaranteed to
-  // be available everywhere.
-  VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    // 3. Choose present mode (FIFO = vsync, good default)
+    // VK_PRESENT_MODE_FIFO_KHR is a v-synced mode and the only mode guaranteed to
+    // be available everywhere.
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
 
-  // 4. Choose image count (triple buffering is nice)
-  uint32_t imageCount = surfaceCapabilities.minImageCount + 1;
+    // 4. Choose image count (triple buffering is nice)
+    uint32_t imageCount = surfaceCapabilities.minImageCount + 1;
 
-  if (surfaceCapabilities.maxImageCount > 0 &&
-      imageCount > surfaceCapabilities.maxImageCount) {
-    imageCount = surfaceCapabilities.maxImageCount;
-  }
-
-  // 5. Choose extent (clamp to surface capabilities)
-  VkExtent2D swapchainExtent = surfaceCapabilities.currentExtent;
-  if (swapchainExtent.width == UINT32_MAX ||
-      swapchainExtent.height == UINT32_MAX) {
-    swapchainExtent.width = width;
-    swapchainExtent.height = height;
-  }
-
-  // Clamp to allowed range
-  swapchainExtent.width = std::clamp(swapchainExtent.width,
-                                     surfaceCapabilities.minImageExtent.width,
-                                     surfaceCapabilities.maxImageExtent.width);
-  swapchainExtent.height = std::clamp(
-      swapchainExtent.height, surfaceCapabilities.minImageExtent.height,
-      surfaceCapabilities.maxImageExtent.height);
-
-  // 6. Create the swapchain
-  VkSwapchainCreateInfoKHR createInfo = {
-      .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-      .surface = engine->surface,
-      .minImageCount = imageCount,
-      .imageFormat = engine->swapchainImageFormat,
-      .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
-      .imageExtent = swapchainExtent,
-      .imageArrayLayers = 1,
-      .imageUsage =
-          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-      .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-      .queueFamilyIndexCount = 0,
-      .pQueueFamilyIndices = nullptr,
-      .preTransform = surfaceCapabilities.currentTransform,
-      .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-      .presentMode = presentMode,
-      .clipped = VK_TRUE,
-      .oldSwapchain = VK_NULL_HANDLE};
-
-  VK_CHECK(vkCreateSwapchainKHR(engine->device, &createInfo, nullptr,
-                                &engine->swapchain));
-
-  engine->swapchainExtent = swapchainExtent;
-
-  // 7. Get swapchain images
-  uint32_t swapchainImageCount = 0;
-  vkGetSwapchainImagesKHR(engine->device, engine->swapchain,
-                          &swapchainImageCount, nullptr);
-  SDL_Log("swapchainImageCount: %d", swapchainImageCount);
-
-  VkImage images[MAX_SWAPCHAIN_IMAGES];
-  vkGetSwapchainImagesKHR(engine->device, engine->swapchain,
-                          &swapchainImageCount, images);
-
-  engine->swapchainImageCount = swapchainImageCount;
-
-  // check depth format
-  std::vector<VkFormat> depthFormatList{VK_FORMAT_D32_SFLOAT_S8_UINT,
-                                        VK_FORMAT_D24_UNORM_S8_UINT};
-  for (VkFormat &format : depthFormatList) {
-    VkFormatProperties2 formatProperties{
-        .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2};
-    vkGetPhysicalDeviceFormatProperties2(engine->chosenGPU, format,
-                                         &formatProperties);
-    if (formatProperties.formatProperties.optimalTilingFeatures &
-        VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
-      engine->depthFormat = format;
-      break;
+    if (surfaceCapabilities.maxImageCount > 0 &&
+        imageCount > surfaceCapabilities.maxImageCount) {
+        imageCount = surfaceCapabilities.maxImageCount;
     }
-  }
 
-  SDL_Log("Selected depth format: %d", (int)engine->depthFormat);
+    // 5. Choose extent (clamp to surface capabilities)
+    VkExtent2D swapchainExtent = surfaceCapabilities.currentExtent;
+    if (swapchainExtent.width == UINT32_MAX ||
+        swapchainExtent.height == UINT32_MAX) {
+        swapchainExtent.width = width;
+        swapchainExtent.height = height;
+    }
 
-  for (uint32_t i = 0; i < swapchainImageCount; ++i) {
-    engine->swapchainImages[i] = images[i];
+    // Clamp to allowed range
+    swapchainExtent.width = std::clamp(swapchainExtent.width,
+                                        surfaceCapabilities.minImageExtent.width,
+                                        surfaceCapabilities.maxImageExtent.width);
+    swapchainExtent.height = std::clamp(
+        swapchainExtent.height, surfaceCapabilities.minImageExtent.height,
+        surfaceCapabilities.maxImageExtent.height);
 
-    // Create image view for each swapchain image
-    VkImageViewCreateInfo viewInfo = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = images[i],
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        //.format     = depthFormat,
-        .format = engine->swapchainImageFormat,
-        .components = {VK_COMPONENT_SWIZZLE_IDENTITY,
-                       VK_COMPONENT_SWIZZLE_IDENTITY,
-                       VK_COMPONENT_SWIZZLE_IDENTITY,
-                       VK_COMPONENT_SWIZZLE_IDENTITY},
-        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                             .baseMipLevel = 0,
-                             .levelCount = 1,
-                             .baseArrayLayer = 0,
-                             .layerCount = 1}};
+    // 6. Create the swapchain
+    VkSwapchainCreateInfoKHR createInfo = {
+        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .surface = engine->surface,
+        .minImageCount = imageCount,
+        .imageFormat = engine->swapchainImageFormat,
+        .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+        .imageExtent = swapchainExtent,
+        .imageArrayLayers = 1,
+        .imageUsage =
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices = nullptr,
+        .preTransform = surfaceCapabilities.currentTransform,
+        .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        .presentMode = presentMode,
+        .clipped = VK_TRUE,
+        .oldSwapchain = VK_NULL_HANDLE};
 
-    VK_CHECK(vkCreateImageView(engine->device, &viewInfo, nullptr,
-                               &engine->swapchainImageViews[i]));
-  }
+    VK_CHECK(vkCreateSwapchainKHR(engine->device, &createInfo, nullptr,
+                                    &engine->swapchain));
 
-  SDL_Log("Swapchain created successfully with %u images", swapchainImageCount);
+    engine->swapchainExtent = swapchainExtent;
+
+    // 7. Get swapchain images
+    uint32_t swapchainImageCount = 0;
+    vkGetSwapchainImagesKHR(engine->device, engine->swapchain,
+                            &swapchainImageCount, nullptr);
+    SDL_Log("swapchainImageCount: %d", swapchainImageCount);
+
+    VkImage images[MAX_SWAPCHAIN_IMAGES];
+    vkGetSwapchainImagesKHR(engine->device, engine->swapchain,
+                            &swapchainImageCount, images);
+
+    engine->swapchainImageCount = swapchainImageCount;
+
+    // check depth format
+    std::vector<VkFormat> depthFormatList{
+        VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_D32_SFLOAT_S8_UINT,
+        VK_FORMAT_D24_UNORM_S8_UINT
+        };
+
+        engine->depthFormat = VK_FORMAT_UNDEFINED;
+
+    for (VkFormat &format : depthFormatList) {
+        VkFormatProperties2 props{
+            .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2};
+        vkGetPhysicalDeviceFormatProperties2(engine->chosenGPU, format,
+                                            &props);
+        if (props.formatProperties.optimalTilingFeatures &
+            VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
+        {
+        engine->depthFormat = format;
+        const char* name = (format == VK_FORMAT_D32_SFLOAT) ? "D32_SFLOAT" :
+        (format == VK_FORMAT_D24_UNORM_S8_UINT) ? "D24_UNORM_S8_UINT" : "D32_SFLOAT_S8_UINT";
+        SDL_Log("Selected depth format: %s", name);
+        break;
+        }
+    }
+
+    SDL_Log("Selected depth format: %d", (int)engine->depthFormat);
+
+    for (uint32_t i = 0; i < swapchainImageCount; ++i) {
+        engine->swapchainImages[i] = images[i];
+
+        // Create image view for each swapchain image
+        VkImageViewCreateInfo viewInfo = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = images[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            //.format     = depthFormat,
+            .format = engine->swapchainImageFormat,
+            .components = {VK_COMPONENT_SWIZZLE_IDENTITY,
+                        VK_COMPONENT_SWIZZLE_IDENTITY,
+                        VK_COMPONENT_SWIZZLE_IDENTITY,
+                        VK_COMPONENT_SWIZZLE_IDENTITY},
+            .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                .baseMipLevel = 0,
+                                .levelCount = 1,
+                                .baseArrayLayer = 0,
+                                .layerCount = 1}};
+
+        VK_CHECK(vkCreateImageView(engine->device, &viewInfo, nullptr,
+                                &engine->swapchainImageViews[i]));
+    }
+
+    SDL_Log("Swapchain created successfully with %u images", swapchainImageCount);
 }
 
 void destroy_swapchain(VulkanEngine *engine) {
@@ -422,44 +433,61 @@ void destroy_swapchain(VulkanEngine *engine) {
 
 void howtoCleanupVulkanEngine(VulkanEngine *engine)
 {
-	VK_CHECK(vkDeviceWaitIdle(engine->device));
+    if(!engine->device) return;
 
-	for (auto i = 0; i < FRAME_OVERLAP; i++) {
-		vkDestroyFence(engine->device, engine->frames[i].renderFence, nullptr);
-		vkDestroySemaphore(engine->device, engine->frames[i].swapchainSemaphore, nullptr);
-		vmaDestroyBuffer(engine->allocator, engine->frames[i].shaderDataBuffers.buffer, engine->frames[i].shaderDataBuffers.allocation);
-	}
+    VK_CHECK(vkDeviceWaitIdle(engine->device));
 
-	for (auto i = 0; i < FRAME_OVERLAP; i++) {
-		vkDestroySemaphore(engine->device, engine->frames[i].renderSemaphore, nullptr);
-	}
+    // 1. Destroy per-frame resources first
+    for (uint32_t i = 0; i < FRAME_OVERLAP; i++) {
+        vkDestroyFence(engine->device, engine->frames[i].renderFence, nullptr);
+        vkDestroySemaphore(engine->device, engine->frames[i].swapchainSemaphore, nullptr);
+        vkDestroySemaphore(engine->device, engine->frames[i].renderSemaphore, nullptr);
+        
+        vmaDestroyBuffer(engine->allocator, engine->frames[i].shaderDataBuffers.buffer, 
+                        engine->frames[i].shaderDataBuffers.allocation);
+    }
 
-	vmaDestroyImage(engine->allocator, engine->depthImage.image, engine->depthImage.allocation);
-	vkDestroyImageView(engine->device, engine->depthImageView, nullptr);
+    // 2. Destroy command pool (this destroys all command buffers)
+    if (engine->commandPool) {
+        vkDestroyCommandPool(engine->device, engine->commandPool, nullptr);
+        engine->commandPool = VK_NULL_HANDLE;
+    }
 
-	for (auto i = 0; i < MAX_SWAPCHAIN_IMAGES; i++) {
-		vkDestroyImageView(engine->device, engine->swapchainImageViews[i], nullptr);
-	}
-	vmaDestroyBuffer(engine->allocator, engine->vBuffer, engine->vBufferAllocation);
-	for (auto i = 0; i < engine->textureCount; i++) {
-		vkDestroyImageView(engine->device, engine->textures[i].view, nullptr);
-		vkDestroySampler(engine->device, engine->textures[i].sampler, nullptr);
-		vmaDestroyImage(engine->allocator, engine->textures[i].image, engine->textures[i].allocation);
-	}
-	vkDestroyDescriptorSetLayout(engine->device, engine->descriptorSetLayoutTex, nullptr);
-	vkDestroyDescriptorPool(engine->device, engine->descriptorPool, nullptr);
-	vkDestroyPipelineLayout(engine->device, engine->pipelineLayout, nullptr);
-	vkDestroyPipeline(engine->device, engine->graphicsPipeline, nullptr);
-	vkDestroySwapchainKHR(engine->device, engine->swapchain, nullptr);
-	vkDestroySurfaceKHR(engine->instance, engine->surface, nullptr);
-	vkDestroyCommandPool(engine->device, engine->commandPool, nullptr);
-	vkDestroyShaderModule(engine->device, engine->shaderModule, nullptr);
-	vmaDestroyAllocator(engine->allocator);
-	SDL_DestroyWindow(engine->window);
-	SDL_QuitSubSystem(SDL_INIT_VIDEO);
-	SDL_Quit();
-	vkDestroyDevice(engine->device, nullptr);
-	vkDestroyInstance(engine->instance, nullptr);
+    // 3. Destroy pipeline and layout
+    if (engine->graphicsPipeline) vkDestroyPipeline(engine->device, engine->graphicsPipeline, nullptr);
+    if (engine->pipelineLayout) vkDestroyPipelineLayout(engine->device, engine->pipelineLayout, nullptr);
+
+    // 4. Destroy descriptors
+    if (engine->descriptorSetLayoutTex) vkDestroyDescriptorSetLayout(engine->device, engine->descriptorSetLayoutTex, nullptr);
+    if (engine->descriptorPool) vkDestroyDescriptorPool(engine->device, engine->descriptorPool, nullptr);
+
+    // 5. Destroy textures
+    for (uint32_t i = 0; i < engine->textureCount; i++) {
+        if (engine->textures[i].view) vkDestroyImageView(engine->device, engine->textures[i].view, nullptr);
+        if (engine->textures[i].sampler) vkDestroySampler(engine->device, engine->textures[i].sampler, nullptr);
+        if (engine->textures[i].image) vmaDestroyImage(engine->allocator, engine->textures[i].image, engine->textures[i].allocation);
+    }
+
+    // 6. Destroy main buffers
+    if (engine->vBuffer) vmaDestroyBuffer(engine->allocator, engine->vBuffer, engine->vBufferAllocation);
+
+    // 7. Destroy offscreen images
+    if (engine->drawImage.imageView) vkDestroyImageView(engine->device, engine->drawImage.imageView, nullptr);
+    if (engine->drawImage.image) vmaDestroyImage(engine->allocator, engine->drawImage.image, engine->drawImage.allocation);
+
+    if (engine->depthImage.imageView) vkDestroyImageView(engine->device, engine->depthImage.imageView, nullptr);
+    if (engine->depthImage.image) vmaDestroyImage(engine->allocator, engine->depthImage.image, engine->depthImage.allocation);
+
+    // 8. Destroy swapchain
+    destroy_swapchain(engine);
+
+    // 9. Destroy surface, device, allocator, window
+    if (engine->surface) vkDestroySurfaceKHR(engine->instance, engine->surface, nullptr);
+    if (engine->device) vkDestroyDevice(engine->device, nullptr);
+    if (engine->allocator) vmaDestroyAllocator(engine->allocator);
+    if (engine->window) SDL_DestroyWindow(engine->window);
+
+    SDL_Quit();
 }
 
 void runVulkanEngine(VulkanEngine *engine) {
@@ -485,7 +513,7 @@ void runVulkanEngine(VulkanEngine *engine) {
 
       // send SDL event to camera and imgui for handling
       engine->mainCamera.processSDLEvent(e);
-      ImGui_ImplSDL3_ProcessEvent(&e);
+      //ImGui_ImplSDL3_ProcessEvent(&e);
     }
 
     // do not draw if we are minimized
@@ -499,12 +527,12 @@ void runVulkanEngine(VulkanEngine *engine) {
       resize_swapchain(engine);
 
     // imgui new frame
-    ImGui_ImplVulkan_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
+    //ImGui_ImplVulkan_NewFrame();
+    //ImGui_ImplSDL3_NewFrame();
+    //ImGui::NewFrame();
 
     // make imgui calculate internal draw structures
-    ImGui::Render();
+    //ImGui::Render();
 
     //drawVulkanEngine(engine);
     drawHowtoVulkanEngine(engine);
@@ -569,8 +597,8 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     FrameData &currentFrame = engine->frames[engine->frameIndex];
 
     // Wait on fence for the last frame the GPU has worked and reset it for the next submission
-    VK_CHECK(vkWaitForFences(engine->device, 1, &engine->frames[engine->frameIndex].renderFence, true, UINT64_MAX));
-    VK_CHECK(vkResetFences(engine->device, 1, &engine->frames[engine->frameIndex].renderFence));
+    VK_CHECK(vkWaitForFences(engine->device, 1, &currentFrame.renderFence, true, UINT64_MAX));
+    VK_CHECK(vkResetFences(engine->device, 1, &currentFrame.renderFence));
 
     // Acquire next image
     //! NOTE(trist007): Semaphores
@@ -594,7 +622,7 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     currentFrame.shaderData.view = HMM_Translate(HMM_V3(engine->camPos.X, engine->camPos.Y, engine->camPos.Z));
 
     // create 3 monkey heads
-    for (auto i = 0; i < 3; i++) {
+    for (uint32_t i = 0; i < 3; i++) {
 
         // set positions of each
         HMM_Vec3 instancePos = HMM_V3(
@@ -611,7 +639,7 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     memcpy(currentFrame.shaderDataBuffers.allocationInfo.pMappedData, &currentFrame.shaderData, sizeof(ShaderData));
 
     // Record command buffer
-    VkCommandBuffer cmd = currentFrame.mainCommandBuffer; 
+    VkCommandBuffer cmd = currentFrame.commandBuffers; 
     VK_CHECK(vkResetCommandBuffer(cmd, 0));
 
     VkCommandBufferBeginInfo beginInfo {
@@ -642,7 +670,8 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
             .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
             .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .image = engine->depthImage.image,
-            .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, .levelCount = 1, .layerCount = 1 }
+            //.subresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, .levelCount = 1, .layerCount = 1 }
+            .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .layerCount = 1 }
         }
             };
     VkDependencyInfo barrierDependencyInfo{
@@ -658,11 +687,11 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
         .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .clearValue{.color{ 0.0f, 0.0f, 0.2f, 1.0f }}
+        .clearValue{.color{ 0.0f, 0.0f, 0.2f, 1.0f }} // RGB this is blue
     };
     VkRenderingAttachmentInfo depthAttachmentInfo{
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = engine->depthImageView,
+        .imageView = engine->depthImage.imageView,
         .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -738,8 +767,19 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     };
     VK_CHECK(vkQueueSubmit(engine->graphicsQueue, 1, &submitInfo, currentFrame.renderFence));
 
-    engine->frameIndex = (engine->frameIndex + 1) * FRAME_OVERLAP;
+    engine->frameIndex = (engine->frameIndex + 1) % FRAME_OVERLAP;
+
     // Present image
+    VkPresentInfoKHR presentInfo{
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &currentFrame.renderSemaphore,
+        .swapchainCount = 1,
+        .pSwapchains = &engine->swapchain,
+        .pImageIndices = &engine->imageIndex
+    };
+
+    VK_CHECK(vkQueuePresentKHR(engine->graphicsQueue, &presentInfo));
     // Poll events
 }
 
@@ -831,8 +871,6 @@ bool howtoVulkan(VulkanEngine *engine)
     memcpy(vBufferAllocInfo.pMappedData, vertices.data(), vBufSize);
     memcpy(((char*)vBufferAllocInfo.pMappedData) + vBufSize, indices.data(), iBufSize);
 
-    engine->frames[FRAME_OVERLAP];
-
     for (uint32_t i = 0; i < FRAME_OVERLAP; i++) {
         VkBufferCreateInfo uBufferCI{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -891,14 +929,23 @@ bool howtoVulkan(VulkanEngine *engine)
         VK_CHECK(vkAllocateCommandBuffers(engine->device, &allocInfo, &engine->frames[i].commandBuffers));
     }
 
+    // there are 3 ktx files in assets
+    engine->textureCount = 3;
     VkDescriptorImageInfo textureDescriptors[engine->textureCount];
 
     // Loading textures
     for (uint32_t i = 0; i < engine->textureCount; i++)
     {
         ktxTexture* ktxTexture{ nullptr };
-        std::string filename = "assets/suzanne" + std::to_string(i) + ".ktx";
-        ktxTexture_CreateFromNamedFile(filename.c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTexture);
+        std::string filename = "../data/assets/suzanne" + std::to_string(i) + ".ktx";
+        KTX_error_code ret = ktxTexture_CreateFromNamedFile(filename.c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTexture);
+
+        if(ret != KTX_SUCCESS || ktxTexture == nullptr)
+        {
+            SDL_Log("current working directory: %s", SDL_GetCurrentDirectory());
+            SDL_Log("Error: failed to load texture %s (error: %d)", filename.c_str(), ret);
+            abort();
+        }
 
         VkImageCreateInfo texImgCI{
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -1141,8 +1188,10 @@ bool howtoVulkan(VulkanEngine *engine)
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
         .pSetLayouts = &engine->descriptorSetLayoutTex,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &pushConstantRange
+        .pushConstantRangeCount = 0,
+        //.pushConstantRangeCount = 1,
+        .pPushConstantRanges = nullptr,
+        //.pPushConstantRanges = &pushConstantRange
     };
     VK_CHECK(vkCreatePipelineLayout(engine->device, &pipelineLayoutCI, nullptr, &engine->pipelineLayout));
 

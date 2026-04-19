@@ -80,16 +80,14 @@ struct ShaderDataBuffer
 
 struct FrameData
 {
-    VkSemaphore swapchainSemaphore;
-    VkSemaphore renderSemaphore;
-    VkFence renderFence;
-
-    VkCommandBuffer mainCommandBuffer;
-
     DeletionQueue deletionQueue;
     DescriptorAllocatorGrowable frameDescriptors;
 
     // howtoVulkan
+    VkSemaphore swapchainSemaphore;
+    VkSemaphore renderSemaphore;
+    VkFence renderFence;
+
     ShaderDataBuffer shaderDataBuffers; // GPU buffer
     ShaderData shaderData;              // CPU data
     VkCommandBuffer commandBuffers{VK_NULL_HANDLE};
