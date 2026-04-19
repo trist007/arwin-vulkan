@@ -1,7 +1,25 @@
 {
     "makefile.makefilePath": "${workspaceFolder}/arwin/code/Makefile",
+    "vim.normalModeKeyBindingsNonRecursive": [
+    {
+        "before": ["="],
+        "after": ["g", "q"]   // or leave empty if you just want to free the key
+    }
+    ],
+
+    "vim.visualModeKeyBindingsNonRecursive": [
+        {
+            "before": ["="],
+            "commands": ["editor.action.formatSelection"]
+        }
+    ],
+    "vim.handleKeys": {
+        "<C-a>": false,
+        "=": true
+    },
     "clangd.arguments": [
-        "--completion-style=detailed",
-        "--header-insertion=never"
+        "--background-index",
+        "--clang-tidy",
+        "--header-insertion=iwyu"
     ]
 }

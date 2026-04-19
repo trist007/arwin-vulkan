@@ -2,6 +2,7 @@
 #include "vk_images.h"
 #include "vk_initializers.h"
 #include <SDL3/SDL_vulkan.h>
+#include <vulkan/vulkan_core.h>
 
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
@@ -443,8 +444,13 @@ void howtoCleanupVulkanEngine(VulkanEngine *engine)
         vkDestroySemaphore(engine->device, engine->frames[i].swapchainSemaphore, nullptr);
         vkDestroySemaphore(engine->device, engine->frames[i].renderSemaphore, nullptr);
         
-        vmaDestroyBuffer(engine->allocator, engine->frames[i].shaderDataBuffers.buffer, 
-                        engine->frames[i].shaderDataBuffers.allocation);
+        // Destroy shader data buffer
+        if (engine->frames[i].shaderDataBuffers.buffer) {
+            vmaDestroyBuffer(engine->allocator, 
+                             engine->frames[i].shaderDataBuffers.buffer, 
+                             engine->frames[i].shaderDataBuffers.allocation);
+            engine->frames[i].shaderDataBuffers.buffer = VK_NULL_HANDLE;
+        }
     }
 
     // 2. Destroy command pool (this destroys all command buffers)
@@ -460,6 +466,10 @@ void howtoCleanupVulkanEngine(VulkanEngine *engine)
     // 4. Destroy descriptors
     if (engine->descriptorSetLayoutTex) vkDestroyDescriptorSetLayout(engine->device, engine->descriptorSetLayoutTex, nullptr);
     if (engine->descriptorPool) vkDestroyDescriptorPool(engine->device, engine->descriptorPool, nullptr);
+
+    // 5. Destroy main geometry buffer
+    if (engine->vBuffer)
+        vmaDestroyBuffer(engine->allocator, engine->vBuffer, engine->vBufferAllocation);
 
     // 5. Destroy textures
     for (uint32_t i = 0; i < engine->textureCount; i++) {
@@ -483,8 +493,9 @@ void howtoCleanupVulkanEngine(VulkanEngine *engine)
 
     // 9. Destroy surface, device, allocator, window
     if (engine->surface) vkDestroySurfaceKHR(engine->instance, engine->surface, nullptr);
-    if (engine->device) vkDestroyDevice(engine->device, nullptr);
     if (engine->allocator) vmaDestroyAllocator(engine->allocator);
+    if (engine->device) vkDestroyDevice(engine->device, nullptr);
+    if (engine->instance) vkDestroyInstance(engine->instance, nullptr);
     if (engine->window) SDL_DestroyWindow(engine->window);
 
     SDL_Quit();
@@ -767,8 +778,6 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     };
     VK_CHECK(vkQueueSubmit(engine->graphicsQueue, 1, &submitInfo, currentFrame.renderFence));
 
-    engine->frameIndex = (engine->frameIndex + 1) % FRAME_OVERLAP;
-
     // Present image
     VkPresentInfoKHR presentInfo{
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -780,7 +789,9 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     };
 
     VK_CHECK(vkQueuePresentKHR(engine->graphicsQueue, &presentInfo));
-    // Poll events
+
+    // Advance frame index at the VERY END
+    engine->frameIndex = (engine->frameIndex + 1) % FRAME_OVERLAP;
 }
 
 bool howtoVulkan(VulkanEngine *engine)
@@ -875,7 +886,7 @@ bool howtoVulkan(VulkanEngine *engine)
         VkBufferCreateInfo uBufferCI{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = sizeof(ShaderData),
-            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
         };
         VmaAllocationCreateInfo uBufferAllocCI{
             .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
@@ -1091,16 +1102,85 @@ bool howtoVulkan(VulkanEngine *engine)
         .bindingCount = 1,
         .pBindingFlags = &descVariableFlag
     };
+
+    VkDescriptorSetLayoutBinding bindings[2] = {};
+
+    // Binding 0: Textures array
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[0].descriptorCount = engine->textureCount;
+    bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    // Binding 1: ShaderData uniform buffer
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    // We no longer need variable descriptor count flags for binding 0 in this simple case
+    VkDescriptorSetLayoutCreateInfo descLayoutCI{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 2,
+        .pBindings = bindings
+    };
+
+    VK_CHECK(vkCreateDescriptorSetLayout(engine->device, &descLayoutCI, nullptr, &engine->descriptorSetLayoutTex));
+
+
+    // === Descriptor Pool (must support both types) ===
+    VkDescriptorPoolSize poolSizes[2] = {};
+
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSizes[0].descriptorCount = engine->textureCount;
+
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[1].descriptorCount = FRAME_OVERLAP * 2;   // one per frame is safe
+
+    VkDescriptorPoolCreateInfo descPoolCI{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = 1,
+        .poolSizeCount = 2,
+        .pPoolSizes = poolSizes
+    };
+
+    VK_CHECK(vkCreateDescriptorPool(engine->device, &descPoolCI, nullptr, &engine->descriptorPool));
+
+
+    // === Allocate Descriptor Set ===
+    VkDescriptorSetAllocateInfo texDescSetAlloc{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = engine->descriptorPool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &engine->descriptorSetLayoutTex
+    };
+
+    VK_CHECK(vkAllocateDescriptorSets(engine->device, &texDescSetAlloc, &engine->descriptorSetTex));
+
+    // Binding 0: Textures (array)
+    /*
     VkDescriptorSetLayoutBinding descLayoutBindingTex{
+        .binding = 0,
         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .descriptorCount = engine->textureCount,
         .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
     };
+
+    // Binding 1: ShaderData (ConstantBuffer)
+    VkDescriptorSetLayoutBinding descLayoutBindingShaderData{
+        .binding = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+    };
+
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings = { descLayoutBindingTex, descLayoutBindingShaderData };
+
     VkDescriptorSetLayoutCreateInfo descLayoutTexCI{
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .pNext = &descBindingFlags,
-        .bindingCount = 1,
-        .pBindings = &descLayoutBindingTex
+        .bindingCount = 2,
+        //.pBindings = &descLayoutBindingTex
+        .pBindings = bindings.data()
     };
     VK_CHECK(vkCreateDescriptorSetLayout(engine->device, &descLayoutTexCI, nullptr, &engine->descriptorSetLayoutTex));
 
@@ -1131,16 +1211,37 @@ bool howtoVulkan(VulkanEngine *engine)
         .pSetLayouts = &engine->descriptorSetLayoutTex
     };
     VK_CHECK(vkAllocateDescriptorSets(engine->device, &texDescSetAlloc, &engine->descriptorSetTex));
+    */
 
-    VkWriteDescriptorSet writeDescSet{
+    // Update existing texture write (binding 0)
+    VkWriteDescriptorSet writeTex{
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstSet = engine->descriptorSetTex,
         .dstBinding = 0,
-        .descriptorCount = (uint32_t)ArraySize(textureDescriptors),
+        .descriptorCount = engine->textureCount,
         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 
         .pImageInfo = textureDescriptors
     };
-    vkUpdateDescriptorSets(engine->device, 1, &writeDescSet, 0, nullptr);
+
+    // New write for shaderData (binding 1)
+    VkDescriptorBufferInfo shaderDataBufferInfo{
+        .buffer = engine->frames[0].shaderDataBuffers.buffer,   // use one from current frame
+        .offset = 0,
+        .range = sizeof(ShaderData)
+    };
+
+    VkWriteDescriptorSet writeShaderData{
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = engine->descriptorSetTex,
+        .dstBinding = 1,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .pBufferInfo = &shaderDataBufferInfo
+    };
+
+    std::array<VkWriteDescriptorSet, 2> writes = { writeTex, writeShaderData };
+
+    vkUpdateDescriptorSets(engine->device, 2, writes.data(), 0, nullptr);
 
     // Loading shaders
     slang::createGlobalSession(engine->slangGlobalSession.writeRef());
@@ -1162,14 +1263,26 @@ bool howtoVulkan(VulkanEngine *engine)
     Slang::ComPtr<slang::ISession> slangSession;
     engine->slangGlobalSession->createSession(slangSessionDesc, slangSession.writeRef());
 
+    Slang::ComPtr<ISlangBlob> diagnosticsBlob;
+
+    SDL_Log("Loading shader current working dir: %s", SDL_GetCurrentDirectory());
     // get shader of slang format which includes both vertex and fragment in one file
     Slang::ComPtr<slang::IModule> slangModule{
-        slangSession->loadModuleFromSource("triangle", "../data/assets/shader.slang", nullptr, nullptr)
+        slangSession->loadModuleFromSource("triangle", "../data/assets/shader.slang", nullptr, diagnosticsBlob.writeRef())
     };
 
-    // compile shader
-    Slang::ComPtr<ISlangBlob> spirv;
-    slangModule->getTargetCode(0, spirv.writeRef());
+    if (!slangModule) {
+        const char* diagMsg = diagnosticsBlob ? (const char*)diagnosticsBlob->getBufferPointer() : "No diagnostics";
+        SDL_Log("ERROR: Failed to load Slang module 'shader.slang'");
+        SDL_Log("Diagnostics: %s", diagMsg);
+        abort();   // or return false;
+    }
+
+    SDL_Log("Slang module loaded successfully");
+
+        // compile shader
+        Slang::ComPtr<ISlangBlob> spirv;
+        slangModule->getTargetCode(0, spirv.writeRef());
 
     // create shader module
     VkShaderModuleCreateInfo shaderModuleCI{
