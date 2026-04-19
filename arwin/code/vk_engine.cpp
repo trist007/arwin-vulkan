@@ -10,11 +10,6 @@
 
 #include "ktxvulkan.h"
 
-// IMGui
-#include "imgui.h"
-#include "imgui_impl_sdl3.h"
-#include "imgui_impl_vulkan.h"
-
 #include "HandmadeMath.h"
 
 #include "initVulkan.h"
@@ -55,13 +50,6 @@ void initVulkanEngine(VulkanEngine *engine) {
   // VkBootstrap
   init_vulkan(engine);
   init_swapchain(engine);
-  //init_commands(engine);
-  //init_sync_structures(engine);
-  //init_descriptors(engine);
-  //init_pipelines(engine);
-  //init_imgui(engine);
-  // init_default_data(engine);
-  // initialize everything for the renderloop drawHowtoVulkan()
   howtoVulkan(engine);
 
   // everything went fine
@@ -634,6 +622,17 @@ VertexInputDescription Vertex::get_vertex_description() {
 void
 drawHowtoVulkanEngine(VulkanEngine *engine)
 {
+    // for glb
+    vkCmdBindVertexBuffers(cmd, 0, 1, &engine->vBuffer, &vOffset);  // vOffset = 0
+    vkCmdBindIndexBuffer(cmd, engine->vBuffer, engine->indexBufferOffset, VK_INDEX_TYPE_UINT32);  // note: uint32 now
+    vkCmdDrawIndexed(cmd, engine->indexCount, 1, 0, 0, 0);   // instanceCount = 1 for now
+
+    /*
+    I used VK_INDEX_TYPE_UINT32 because glTF often has more than 65k vertices.
+    If you want to support multiple meshes later, we can extend upload_gltf_to_gpu to create separate buffers per mesh.
+    Skinning (joints/weights) is already in the Vertex struct, so you can add the skinning matrix uniform later.
+    */
+
     // get current frame
     FrameData &currentFrame = engine->frames[engine->frameIndex];
 
@@ -646,14 +645,20 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     //! swapchainSemaphore is signaled by the presentation engine when the swapchain image is ready to be used.
     //! renderSemaphore is usually signaled by the queue submission when rendering is finished, so the presentation can wait on it.
     uint32_t imageIndex;
-    VK_CHECK(vkAcquireNextImageKHR(
+    VkResult e = vkAcquireNextImageKHR(
         engine->device,
         engine->swapchain,
         UINT64_MAX,
         currentFrame.swapchainSemaphore,
         VK_NULL_HANDLE,
         &imageIndex
-    ));
+    );
+
+    if(e == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        engine->resize_requested = true;
+        return;
+    }
 
     engine->imageIndex = imageIndex;
 
@@ -823,7 +828,12 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
         .pImageIndices = &engine->imageIndex
     };
 
-    VK_CHECK(vkQueuePresentKHR(engine->graphicsQueue, &presentInfo));
+    VkResult presentResult = vkQueuePresentKHR(engine->graphicsQueue, &presentInfo);
+    if(presentResult == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        engine->resize_requested = true;
+        return;
+    }
 
     // Advance frame index at the VERY END
     engine->frameIndex = (engine->frameIndex + 1) % FRAME_OVERLAP;
@@ -838,6 +848,31 @@ bool howtoVulkan(VulkanEngine *engine)
     std::string err;
 
     bool result = true;
+
+
+    // === REMOVE ALL THIS OLD CODE ===
+    // tinyobj::LoadObj(...)
+    // the big for loop that built vertices and indices from attrib
+    // the KTX texture loading loop
+    // engine->textureCount = 3;  etc.
+
+    // === REPLACE WITH THIS ===
+
+    LoadedModel myModel = load_gltf_model(&gArena, "../data/models/your_model.glb");  // ← change path
+
+    if (myModel.mesh.vertCount == 0) {
+        SDL_Log("Failed to load glTF model!");
+        return false;
+    }
+
+    // Upload to Vulkan GPU buffers
+    if (!upload_gltf_to_gpu(engine, &myModel)) {
+        SDL_Log("Failed to upload glTF mesh to GPU");
+        return false;
+    }
+
+    SDL_Log("Successfully loaded and uploaded glTF model with %d vertices, %d indices", 
+            myModel.mesh.vertCount, myModel.mesh.triCount);
 
     // load obj
     result = tinyobj::LoadObj(&engine->attrib, &engine->shapes, &engine->materials, &warn, &err, "../data/assets/suzanne.obj", "../data/assets");
@@ -1449,20 +1484,57 @@ bool howtoVulkan(VulkanEngine *engine)
     return true;
 }
 
-void resize_swapchain(VulkanEngine *engine) {
-  vkDeviceWaitIdle(engine->device);
+void
+resize_swapchain(VulkanEngine *engine)
+{
+    if (engine->windowExtent.width == 0 || engine->windowExtent.height == 0)
+        return;   // minimized, don't resize
 
-  destroy_swapchain(engine);
+    vkDeviceWaitIdle(engine->device);
 
-  int w, h;
-  SDL_GetWindowSize(engine->window, &w, &h);
-  engine->windowExtent.width = w;
-  engine->windowExtent.height = h;
+    destroy_swapchain(engine);
 
-  create_swapchain(engine, engine->windowExtent.width,
-                   engine->windowExtent.height);
+        // Destroy offscreen images
+    if (engine->drawImage.imageView != VK_NULL_HANDLE)
+        vkDestroyImageView(engine->device, engine->drawImage.imageView, nullptr);
+    if (engine->drawImage.image != VK_NULL_HANDLE)
+        vmaDestroyImage(engine->allocator, engine->drawImage.image, engine->drawImage.allocation);
 
-  engine->resize_requested = false;
+    if (engine->depthImage.imageView != VK_NULL_HANDLE)
+        vkDestroyImageView(engine->device, engine->depthImage.imageView, nullptr);
+    if (engine->depthImage.image != VK_NULL_HANDLE)
+        vmaDestroyImage(engine->allocator, engine->depthImage.image, engine->depthImage.allocation);
+
+    // Get new window size
+    int w, h;
+    SDL_GetWindowSize(engine->window, &w, &h);
+    engine->windowExtent.width = (uint32_t)w;
+    engine->windowExtent.height = (uint32_t)h;
+
+    // Recreate swapchain
+    create_swapchain(engine, engine->windowExtent.width, engine->windowExtent.height);
+
+    // Recreate offscreen render targets (drawImage + depthImage)
+    VkExtent3D newExtent = { engine->windowExtent.width, engine->windowExtent.height, 1 };
+
+    // Recreate drawImage (HDR color target)
+    engine->drawImage = create_image(engine, newExtent, 
+                                     VK_FORMAT_R16G16B16A16_SFLOAT,
+                                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
+                                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | 
+                                     VK_IMAGE_USAGE_STORAGE_BIT | 
+                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 
+                                     false);
+
+    // Recreate depth image
+    engine->depthImage = create_image(engine, newExtent, 
+                                      depthFormat,
+                                      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 
+                                      false);
+
+    engine->resize_requested = false;
+
+    SDL_Log("Swapchain and render targets resized to %ux%u", w, h);
 }
 
 AllocatedImage create_image(VulkanEngine* engine, VkExtent3D size,

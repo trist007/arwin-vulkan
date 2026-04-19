@@ -116,140 +116,8 @@ struct ivec2
     int x, y;
 };
 
-struct VulkanEngine;
-
-struct GLTFMetallic_Roughness {
-	MaterialPipeline opaquePipeline;
-	MaterialPipeline transparentPipeline;
-
-	VkDescriptorSetLayout materialLayout;
-
-	struct MaterialConstants {
-		HMM_Vec4 colorFactors;
-		HMM_Vec4 metal_rough_factors;
-		//padding, we need it anyway for uniform buffers
-		HMM_Vec4 extra[14];
-	};
-
-	struct MaterialResources {
-		AllocatedImage colorImage;
-		VkSampler colorSampler;
-		AllocatedImage metalRoughImage;
-		VkSampler metalRoughSampler;
-		VkBuffer dataBuffer;
-		uint32_t dataBufferOffset;
-	};
-
-	DescriptorWriter writer;
-
-	void build_pipelines(VulkanEngine *engine);
-	void clear_resources(VkDevice device);
-
-	MaterialInstance write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator);
-};
-
-struct RenderObject
-{
-    uint32_t indexCount;
-    uint32_t firstIndex;
-    VkBuffer indexBuffer;
-
-    MaterialInstance *material;
-
-    HMM_Mat4 transform;
-    VkDeviceAddress vertexBufferAddress;
-};
-
 constexpr unsigned int FRAME_OVERLAP = 2;
 
-struct MeshAsset;
-
-struct DrawContext {
-	std::vector<RenderObject> OpaqueSurfaces;
-};
-
-/*
-struct HowtoVulkanEngine {
-    // === Core Vulkan handles ===
-    VkInstance instance{ VK_NULL_HANDLE };
-    VkPhysicalDevice physicalDevice{ VK_NULL_HANDLE };
-    VkDevice device{ VK_NULL_HANDLE };
-    VkQueue graphicsQueue{ VK_NULL_HANDLE };
-    uint32_t graphicsQueueFamily{ 0 };
-
-    VkSurfaceKHR surface{ VK_NULL_HANDLE };
-    VkSwapchainKHR swapchain{ VK_NULL_HANDLE };
-
-    // === VMA ===
-    VmaAllocator allocator{ VK_NULL_HANDLE };
-
-    // === Swapchain related ===
-    std::vector<VkImage> swapchainImages;
-    std::vector<VkImageView> swapchainImageViews;
-    VkFormat swapchainImageFormat{ VK_FORMAT_UNDEFINED };
-    VkExtent2D swapchainExtent{};
-
-    // === Depth buffer ===
-    VkImage depthImage{ VK_NULL_HANDLE };
-    VmaAllocation depthImageAllocation{ VK_NULL_HANDLE };
-    VkImageView depthImageView{ VK_NULL_HANDLE };
-    VkFormat depthFormat{ VK_FORMAT_UNDEFINED };
-
-    // === Command buffers & sync ===
-    VkCommandPool commandPool{ VK_NULL_HANDLE };
-    std::array<VkCommandBuffer, maxFramesInFlight> commandBuffers{};
-    std::array<VkFence, maxFramesInFlight> fences{};
-    std::array<VkSemaphore, maxFramesInFlight> imageAvailableSemaphores{};   // renamed from presentSemaphores
-    std::vector<VkSemaphore> renderFinishedSemaphores{};                     // one per swapchain image
-
-    bool framebufferResized{ false };   // for resize handling
-
-    // === Mesh data (your suzanne.obj) ===
-    VkBuffer vertexBuffer{ VK_NULL_HANDLE };      // combined vertex + index buffer
-    VmaAllocation vertexBufferAllocation{ VK_NULL_HANDLE };
-    VkDeviceSize indexOffset{ 0 };                // byte offset where indices start in the buffer
-    uint32_t indexCount{ 0 };
-
-    // === Uniform / Shader data buffers (per-frame) ===
-    struct ShaderDataBuffer {
-        VkBuffer buffer{ VK_NULL_HANDLE };
-        VmaAllocation allocation{ VK_NULL_HANDLE };
-        VmaAllocationInfo allocationInfo{};
-        VkDeviceAddress deviceAddress{ 0 };
-    };
-    std::array<ShaderDataBuffer, maxFramesInFlight> shaderDataBuffers{};
-
-    // === Textures ===
-    struct Texture {
-        VkImage image{ VK_NULL_HANDLE };
-        VmaAllocation allocation{ VK_NULL_HANDLE };
-        VkImageView view{ VK_NULL_HANDLE };
-        VkSampler sampler{ VK_NULL_HANDLE };
-    };
-    std::array<Texture, 3> textures{};
-
-    // === Descriptors ===
-    VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
-    VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };   // renamed from descriptorSetLayoutTex
-    VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };               // renamed from descriptorSetTex
-
-    // === Pipeline ===
-    VkPipeline pipeline{ VK_NULL_HANDLE };
-    VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
-
-    // === Shader compiler (Slang) ===
-    Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
-
-    // === Other useful state ===
-    SDL_Window* window{ nullptr };
-    glm::ivec2 windowSize{ 1280, 720 };
-    glm::vec3 cameraPosition{ 0.0f, 0.0f, -6.0f };
-    glm::vec3 objectRotations[3]{};
-    uint32_t selectedObject{ 1 };
-
-    bool isInitialized{ false };
-};
-*/
 struct Texture
 {
     VmaAllocation allocation;
@@ -260,90 +128,6 @@ struct Texture
 
 struct VulkanEngine
 {
-    // general
-    /*
-    bool isInitialized;
-    bool stop_rendering;
-    int frameNumber;
-
-    // vulkan core
-    VkExtent2D windowExtent;
-    SDL_Window *window;
-    VkInstance instance;
-    VkDebugUtilsMessengerEXT debugMessenger;
-    VkSurfaceKHR surface;
-    VkDevice device;
-    VkPhysicalDevice chosenGPU;
-    VkFormat swapchainImageFormat;
-    uint32_t swapchainImageCount;
-    VkExtent2D swapchainExtent;
-
-    // queues
-    VkQueue graphicsQueue;
-    uint32_t graphicsQueueFamily;
-    DeletionQueue deletionQueue;
-    DeletionQueue mainDeletionQueue;
-    VmaAllocator allocator;
-
-    // draw resources
-    AllocatedImage drawImage;
-    AllocatedImage depthImage;
-    VkExtent2D drawExtent;
-    float renderScale = 1.0f;
-
-    // VkDescriptor
-    DescriptorAllocatorGrowable globalDescriptorAllocator;
-    VkDescriptorSet drawImageDescriptors;
-    VkDescriptorSetLayout drawImageDescriptorLayout;
-
-    // VkPipeline
-    VkPipeline gradientPipeline;
-    VkPipelineLayout gradientPipelineLayout;
-
-    // immediate submit structures
-    VkFence immFence;
-    VkCommandBuffer immCommandBuffer;
-    VkCommandPool immCommandPool;
-
-    // Compute Effects
-    std::vector<ComputeEffect> backgroundEffects;
-    int currentBackgroundEffect;
-
-    // Graphics pipeline
-    // VkPipelineLayout trianglePipelineLayout;
-    // VkPipeline trianglePipeline;
-
-    // Mesh
-    VkPipelineLayout meshPipelineLayout;
-    VkPipeline meshPipeline;
-
-    // GPUMeshBuffers rectangle;
-    std::vector<std::shared_ptr<MeshAsset>> testMeshes;
-
-    bool resize_requested;
-
-    GPUSceneData sceneData;
-    VkDescriptorSetLayout gpuSceneDataDescriptorLayout;
-    VkDescriptorSetLayout singleImageDescriptorLayout;
-
-    // images
-    AllocatedImage whiteImage;
-    AllocatedImage blackImage;
-    AllocatedImage greyImage;
-    AllocatedImage errorCheckerboardImage;
-
-    VkSampler defaultSamplerLinear;
-    VkSampler defaultSamplerNearest;
-
-    MaterialInstance defaultData;
-    GLTFMetallic_Roughness metalRoughMaterial;
-
-    DrawContext mainDrawContext;
-    std::unordered_map<std::string, std::shared_ptr<Node>> loadedNodes;
-
-    Camera mainCamera;
-    */
-
     //! NOTE(trist007): HowtoVulkan
 
     bool isInitialized;
@@ -427,60 +211,25 @@ struct VulkanEngine
 
 };
 
-struct MeshNode : public Node {
-
-	std::shared_ptr<MeshAsset> mesh;
-
-	virtual void Draw(const HMM_Mat4& topMatrix, DrawContext& ctx) override;
-};
-
 // singleton for pointer retrieval
 VulkanEngine *getVulkanEngine(void);
-
-// VkBootstrap functions
-/*
-	VkInstance _instance;// Vulkan library handle
-	VkDebugUtilsMessengerEXT _debug_messenger;// Vulkan debug output handle
-	VkPhysicalDevice _chosenGPU;// GPU chosen as the default device
-	VkDevice _device; // Vulkan device for commands
-	VkSurfaceKHR _surface;// Vulkan window surface
-*/
 
 // init functions
 void init_vulkan(VulkanEngine *engine);
 void init_swapchain(VulkanEngine *engine);
-void init_commands(VulkanEngine *engine);
-void init_sync_structures(VulkanEngine *engine);
-void init_descriptors(VulkanEngine *engine);
-void init_pipelines(VulkanEngine *engine);
-void init_background_pipelines(VulkanEngine *engine);
-void init_imgui(VulkanEngine *engine);
-void init_triangle_pipeline(VulkanEngine *engine);
-void init_mesh_pipeline(VulkanEngine *engine);
 
 void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height);
 void destroy_swapchain(VulkanEngine *engine);
-void draw_background(VulkanEngine *engine, VkCommandBuffer cmd);
-void draw_geometry(VulkanEngine *engine, VkCommandBuffer cmd);
-void immediate_submit(VulkanEngine *engine, std::function<void(VkCommandBuffer cmd)>&& function);
 void draw_imgui(VulkanEngine *engine, VkCommandBuffer cmd, VkImageView targetImageView);
 void resize_swapchain(VulkanEngine *engine);
-void update_scene(VulkanEngine *engine);
 
 void initVulkanEngine(VulkanEngine *engine);
 void cleanupVulkanEngine(VulkanEngine *engine);
 void howtoCleanupVulkanEngine(VulkanEngine *engine);
 
-void drawVulkanEngine(VulkanEngine *engine);
 void drawHowtoVulkanEngine(VulkanEngine *engine);
 void runVulkanEngine(VulkanEngine *engine);
 FrameData *getCurrentFrame(VulkanEngine *engine);
-
-// Mesh buffers
-AllocatedBuffer create_buffer(VulkanEngine *engine, size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
-void destroy_buffer(VulkanEngine *engine, const AllocatedBuffer &buffer);
-GPUMeshBuffers uploadMesh(VulkanEngine *engine, std::span<uint32_t> indices, std::span<Vertex> vertices);
-void init_default_data(VulkanEngine *engine);
 
 // Textures
 AllocatedImage create_image(VulkanEngine *engine, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);

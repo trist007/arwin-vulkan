@@ -55,58 +55,6 @@ struct AllocatedBuffer
     VmaAllocationInfo info;
 };
 
-enum class MaterialPass :uint8_t {
-    MainColor,
-    Transparent,
-    Other
-};
-struct MaterialPipeline {
-	VkPipeline pipeline;
-	VkPipelineLayout layout;
-};
-
-struct MaterialInstance {
-    MaterialPipeline* pipeline;
-    VkDescriptorSet materialSet;
-    MaterialPass passType;
-};
-
-struct DrawContext;
-
-class IRenderable
-{
-    virtual void Draw(const HMM_Mat4 &topMatrix, DrawContext &ctx) = 0;
-};
-
-// implementation of a drawable scene node.
-// the scene node can hold children and will also keep a transform to propagate
-// to them
-struct Node : public IRenderable {
-
-    // parent pointer must be a weak pointer to avoid circular dependencies
-    std::weak_ptr<Node> parent;
-    std::vector<std::shared_ptr<Node>> children;
-
-    HMM_Mat4 localTransform;
-    HMM_Mat4 worldTransform;
-
-    void refreshTransform(const HMM_Mat4& parentMatrix)
-    {
-        worldTransform = parentMatrix * localTransform;
-        for (auto c : children) {
-            c->refreshTransform(worldTransform);
-        }
-    }
-
-    virtual void Draw(const HMM_Mat4& topMatrix, DrawContext& ctx)
-    {
-        // draw children
-        for (auto& c : children) {
-            c->Draw(topMatrix, ctx);
-        }
-    }
-};
-
 struct VertexInputDescription
 {
     std::vector<VkVertexInputBindingDescription> bindings;
@@ -122,8 +70,9 @@ struct Vertex
 
     HMM_Vec2 color;
 
+    int   joints[4];
+    float weights[4];
     static VertexInputDescription get_vertex_description();
-
 };
 
 // holds the resources needed for a mesh
