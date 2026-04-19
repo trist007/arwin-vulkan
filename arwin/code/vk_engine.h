@@ -361,6 +361,7 @@ struct VulkanEngine
     VkSurfaceKHR surface{ VK_NULL_HANDLE };
     VkPhysicalDevice chosenGPU;
     uint32_t swapchainImageCount;
+    VkSemaphore renderSemaphores[MAX_SWAPCHAIN_IMAGES];
 
     // queues
     VkQueue graphicsQueue;

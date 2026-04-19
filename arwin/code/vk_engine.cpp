@@ -434,18 +434,23 @@ void destroy_swapchain(VulkanEngine *engine) {
 
 void howtoCleanupVulkanEngine(VulkanEngine *engine)
 {
-    if(!engine->device) return;
+    if (!engine || !engine->device) return;
 
     VK_CHECK(vkDeviceWaitIdle(engine->device));
 
-    // 1. Destroy per-frame resources first
+    // 1. Per-frame resources
     for (uint32_t i = 0; i < FRAME_OVERLAP; i++) {
-        vkDestroyFence(engine->device, engine->frames[i].renderFence, nullptr);
-        vkDestroySemaphore(engine->device, engine->frames[i].swapchainSemaphore, nullptr);
-        vkDestroySemaphore(engine->device, engine->frames[i].renderSemaphore, nullptr);
-        
-        // Destroy shader data buffer
-        if (engine->frames[i].shaderDataBuffers.buffer) {
+        if (engine->frames[i].renderFence)
+            vkDestroyFence(engine->device, engine->frames[i].renderFence, nullptr);
+
+        if (engine->frames[i].swapchainSemaphore)
+            vkDestroySemaphore(engine->device, engine->frames[i].swapchainSemaphore, nullptr);
+
+        if (engine->frames[i].renderSemaphore)
+            vkDestroySemaphore(engine->device, engine->frames[i].renderSemaphore, nullptr);
+
+        // Shader data buffer
+        if (engine->frames[i].shaderDataBuffers.buffer != VK_NULL_HANDLE) {
             vmaDestroyBuffer(engine->allocator, 
                              engine->frames[i].shaderDataBuffers.buffer, 
                              engine->frames[i].shaderDataBuffers.allocation);
@@ -453,50 +458,75 @@ void howtoCleanupVulkanEngine(VulkanEngine *engine)
         }
     }
 
-    // 2. Destroy command pool (this destroys all command buffers)
-    if (engine->commandPool) {
+    // 2. Command pool (destroys all command buffers)
+    if (engine->commandPool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(engine->device, engine->commandPool, nullptr);
         engine->commandPool = VK_NULL_HANDLE;
     }
 
-    // 3. Destroy pipeline and layout
-    if (engine->graphicsPipeline) vkDestroyPipeline(engine->device, engine->graphicsPipeline, nullptr);
-    if (engine->pipelineLayout) vkDestroyPipelineLayout(engine->device, engine->pipelineLayout, nullptr);
+    // 3. Pipeline objects
+    if (engine->graphicsPipeline != VK_NULL_HANDLE)
+        vkDestroyPipeline(engine->device, engine->graphicsPipeline, nullptr);
 
-    // 4. Destroy descriptors
-    if (engine->descriptorSetLayoutTex) vkDestroyDescriptorSetLayout(engine->device, engine->descriptorSetLayoutTex, nullptr);
-    if (engine->descriptorPool) vkDestroyDescriptorPool(engine->device, engine->descriptorPool, nullptr);
+    if (engine->pipelineLayout != VK_NULL_HANDLE)
+        vkDestroyPipelineLayout(engine->device, engine->pipelineLayout, nullptr);
 
-    // 5. Destroy main geometry buffer
-    if (engine->vBuffer)
+    // 4. Descriptors
+    if (engine->descriptorSetLayoutTex != VK_NULL_HANDLE)
+        vkDestroyDescriptorSetLayout(engine->device, engine->descriptorSetLayoutTex, nullptr);
+
+    if (engine->descriptorPool != VK_NULL_HANDLE)
+        vkDestroyDescriptorPool(engine->device, engine->descriptorPool, nullptr);
+
+    // 5. Main geometry buffer
+    if (engine->vBuffer != VK_NULL_HANDLE) {
         vmaDestroyBuffer(engine->allocator, engine->vBuffer, engine->vBufferAllocation);
-
-    // 5. Destroy textures
-    for (uint32_t i = 0; i < engine->textureCount; i++) {
-        if (engine->textures[i].view) vkDestroyImageView(engine->device, engine->textures[i].view, nullptr);
-        if (engine->textures[i].sampler) vkDestroySampler(engine->device, engine->textures[i].sampler, nullptr);
-        if (engine->textures[i].image) vmaDestroyImage(engine->allocator, engine->textures[i].image, engine->textures[i].allocation);
+        engine->vBuffer = VK_NULL_HANDLE;
     }
 
-    // 6. Destroy main buffers
-    if (engine->vBuffer) vmaDestroyBuffer(engine->allocator, engine->vBuffer, engine->vBufferAllocation);
+    // 6. Textures
+    for (uint32_t i = 0; i < engine->textureCount; i++) {
+        if (engine->textures[i].view != VK_NULL_HANDLE)
+            vkDestroyImageView(engine->device, engine->textures[i].view, nullptr);
 
-    // 7. Destroy offscreen images
-    if (engine->drawImage.imageView) vkDestroyImageView(engine->device, engine->drawImage.imageView, nullptr);
-    if (engine->drawImage.image) vmaDestroyImage(engine->allocator, engine->drawImage.image, engine->drawImage.allocation);
+        if (engine->textures[i].sampler != VK_NULL_HANDLE)
+            vkDestroySampler(engine->device, engine->textures[i].sampler, nullptr);
 
-    if (engine->depthImage.imageView) vkDestroyImageView(engine->device, engine->depthImage.imageView, nullptr);
-    if (engine->depthImage.image) vmaDestroyImage(engine->allocator, engine->depthImage.image, engine->depthImage.allocation);
+        if (engine->textures[i].image != VK_NULL_HANDLE)
+            vmaDestroyImage(engine->allocator, engine->textures[i].image, engine->textures[i].allocation);
+    }
 
-    // 8. Destroy swapchain
+    // 7. Offscreen images
+    if (engine->drawImage.imageView != VK_NULL_HANDLE)
+        vkDestroyImageView(engine->device, engine->drawImage.imageView, nullptr);
+
+    if (engine->drawImage.image != VK_NULL_HANDLE)
+        vmaDestroyImage(engine->allocator, engine->drawImage.image, engine->drawImage.allocation);
+
+    if (engine->depthImage.imageView != VK_NULL_HANDLE)
+        vkDestroyImageView(engine->device, engine->depthImage.imageView, nullptr);
+
+    if (engine->depthImage.image != VK_NULL_HANDLE)
+        vmaDestroyImage(engine->allocator, engine->depthImage.image, engine->depthImage.allocation);
+
+    // 8. Swapchain
     destroy_swapchain(engine);
 
-    // 9. Destroy surface, device, allocator, window
-    if (engine->surface) vkDestroySurfaceKHR(engine->instance, engine->surface, nullptr);
-    if (engine->allocator) vmaDestroyAllocator(engine->allocator);
-    if (engine->device) vkDestroyDevice(engine->device, nullptr);
-    if (engine->instance) vkDestroyInstance(engine->instance, nullptr);
-    if (engine->window) SDL_DestroyWindow(engine->window);
+    // 9. Final objects
+    if (engine->surface != VK_NULL_HANDLE)
+        vkDestroySurfaceKHR(engine->instance, engine->surface, nullptr);
+
+    if (engine->allocator != VK_NULL_HANDLE)
+        vmaDestroyAllocator(engine->allocator);
+
+    if (engine->device != VK_NULL_HANDLE)
+        vkDestroyDevice(engine->device, nullptr);
+
+    if (engine->instance != VK_NULL_HANDLE)
+        vkDestroyInstance(engine->instance, nullptr);
+
+    if (engine->window)
+        SDL_DestroyWindow(engine->window);
 
     SDL_Quit();
 }
@@ -615,13 +645,17 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     //! NOTE(trist007): Semaphores
     //! swapchainSemaphore is signaled by the presentation engine when the swapchain image is ready to be used.
     //! renderSemaphore is usually signaled by the queue submission when rendering is finished, so the presentation can wait on it.
-    VK_CHECK(vkAcquireNextImageKHR(engine->device,
+    uint32_t imageIndex;
+    VK_CHECK(vkAcquireNextImageKHR(
+        engine->device,
         engine->swapchain,
         UINT64_MAX,
         currentFrame.swapchainSemaphore,
         VK_NULL_HANDLE,
-        &engine->imageIndex
+        &imageIndex
     ));
+
+    engine->imageIndex = imageIndex;
 
     // Update shader data
     currentFrame.shaderData.projection = HMM_Perspective_RH_ZO(
@@ -765,7 +799,8 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     vkEndCommandBuffer(cmd);
 
     // Submit command buffer
-    VkPipelineStageFlags waitStages = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkPipelineStageFlags waitStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    //VkPipelineStageFlags waitStages = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submitInfo{
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .waitSemaphoreCount = 1,
@@ -774,7 +809,7 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd,
         .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &currentFrame.renderSemaphore,
+        .pSignalSemaphores = &engine->renderSemaphores[imageIndex]
     };
     VK_CHECK(vkQueueSubmit(engine->graphicsQueue, 1, &submitInfo, currentFrame.renderFence));
 
@@ -782,7 +817,7 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     VkPresentInfoKHR presentInfo{
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &currentFrame.renderSemaphore,
+        .pWaitSemaphores = &engine->renderSemaphores[imageIndex],
         .swapchainCount = 1,
         .pSwapchains = &engine->swapchain,
         .pImageIndices = &engine->imageIndex
@@ -915,10 +950,18 @@ bool howtoVulkan(VulkanEngine *engine)
         .flags = VK_FENCE_CREATE_SIGNALED_BIT
     };
 
+    //! NOTE(trist007): was doing 1 semaphore per frame but was getting VUID-vkQueueSubmit-pSignalSemaphores-00067
+    //! moving to 1 semaphore per swapchainImage
     for (uint32_t i = 0; i < FRAME_OVERLAP; i++) {
         VK_CHECK(vkCreateFence(engine->device, &fenceCI, nullptr, &engine->frames[i].renderFence));
         VK_CHECK(vkCreateSemaphore(engine->device, &semaphoreCI, nullptr, &engine->frames[i].swapchainSemaphore));
         VK_CHECK(vkCreateSemaphore(engine->device, &semaphoreCI, nullptr, &engine->frames[i].renderSemaphore));
+    }
+
+    //! NOTE(trist007): creating 1 semaphore per swapchainImageCount
+    for(uint32_t i = 0; i < engine->swapchainImageCount; i++)
+    {
+        VK_CHECK(vkCreateSemaphore(engine->device, &semaphoreCI, nullptr, &engine->renderSemaphores[i]));
     }
 
     VkCommandPoolCreateInfo commandPoolCI{
