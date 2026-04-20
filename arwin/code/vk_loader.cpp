@@ -17,6 +17,7 @@ int find_joint_index(cgltf_data *data, cgltf_node *node)
     return -1;
 }
 
+/*
 void extract_mesh(cgltf_data *data, Mesh *mesh)
 {
     // first pass: count total verts and tris across all primitives
@@ -116,6 +117,7 @@ void extract_mesh(cgltf_data *data, Mesh *mesh)
         triOffset  += primTris;
     }
 }
+*/
 
 void extract_skeleton(cgltf_data *data, Skeleton *skel)
 {
@@ -190,6 +192,39 @@ int path_to_type(cgltf_animation_path_type path)
     }
 }
 
+void extract_materials(cgltf_data* data, Mesh* mesh)
+{
+    if (data->materials_count == 0)
+    {
+        mesh->materialCount = 1;
+        mesh->materials[0].baseColorFactor = HMM_V4(1,1,1,1);
+        return;
+    }
+
+    mesh->materialCount = (int)data->materials_count;
+    if (mesh->materialCount > 8) mesh->materialCount = 8;
+
+    for (int i = 0; i < mesh->materialCount; ++i)
+    {
+        cgltf_material* mat = &data->materials[i];
+
+        if (mat->has_pbr_metallic_roughness)
+        {
+            cgltf_pbr_metallic_roughness* pbr = &mat->pbr_metallic_roughness;
+            mesh->materials[i].baseColorFactor = HMM_V4(
+                pbr->base_color_factor[0],
+                pbr->base_color_factor[1],
+                pbr->base_color_factor[2],
+                pbr->base_color_factor[3]
+            );
+        }
+        else
+        {
+            mesh->materials[i].baseColorFactor = HMM_V4(1,1,1,1);
+        }
+    }
+}
+
 void extract_animations(cgltf_data *data, Model *m)
 {
     m->animCount  = (int)data->animations_count;
@@ -243,15 +278,14 @@ Model load_gltf_model(Arena* arena, const char* path)
         return model;
     }
 
-    // Allocate persistent copy in your arena (SDL_LoadFile uses SDL_malloc)
     void* arenaData = arenaAlloc(arena, fileSize);
     if (!arenaData) {
-        SDL_free(fileData);   // important: free SDL's allocation
+        SDL_free(fileData);
         SDL_Log("Arena allocation failed for model data");
         return model;
     }
     memcpy(arenaData, fileData, fileSize);
-    SDL_free(fileData);       // free SDL's buffer immediately
+    SDL_free(fileData);
 
     // === cgltf parsing ===
     cgltf_options options = {};
@@ -262,8 +296,6 @@ Model load_gltf_model(Arena* arena, const char* path)
         return model;
     }
 
-    // For .glb files (binary, embedded buffers), this usually does almost nothing.
-    // For .gltf + external .bin, it will try to load them using the original path.
     if (cgltf_load_buffers(&options, data, path) != cgltf_result_success) {
         SDL_Log("cgltf_load_buffers failed for: %s", path);
         cgltf_free(data);
@@ -273,9 +305,9 @@ Model load_gltf_model(Arena* arena, const char* path)
     SDL_Log("Loaded glTF: %zu meshes, %zu skins, %zu animations", 
             data->meshes_count, data->skins_count, data->animations_count);
 
-    // === Extract Mesh (with skinning) ===
+    // === Extract Mesh with per-primitive colors ===
     if (data->meshes_count > 0) {
-        cgltf_mesh* gltfMesh = &data->meshes[0];   // taking first mesh for now
+        cgltf_mesh* gltfMesh = &data->meshes[0];
 
         int totalVerts = 0;
         int totalTris = 0;
@@ -285,7 +317,7 @@ Model load_gltf_model(Arena* arena, const char* path)
             if (prim->type != cgltf_primitive_type_triangles || !prim->indices) 
                 continue;
 
-            totalVerts += (int)prim->attributes[0].data->count;  // assuming position attribute exists
+            totalVerts += (int)prim->attributes[0].data->count;
             totalTris += (int)prim->indices->count / 3;
         }
 
@@ -301,6 +333,7 @@ Model load_gltf_model(Arena* arena, const char* path)
 
         int vertOffset = 0;
         int triOffset  = 0;
+        model.mesh.primitiveCount = 0;
 
         for (cgltf_size p = 0; p < gltfMesh->primitives_count; ++p) {
             cgltf_primitive* prim = &gltfMesh->primitives[p];
@@ -328,21 +361,19 @@ Model load_gltf_model(Arena* arena, const char* path)
                 Vertex* v = &model.mesh.verts[vertOffset + i];
 
                 cgltf_accessor_read_float(posAcc, i, &v->position.X, 3);
-                if (normAcc)
-                    cgltf_accessor_read_float(normAcc, i, &v->normal.X, 3);
-                else
-                    v->normal = HMM_V3(0, 1, 0);
+                if (normAcc) cgltf_accessor_read_float(normAcc, i, &v->normal.X, 3);
+                else v->normal = HMM_V3(0, 1, 0);
 
                 if (uvAcc) {
                     float uv[2] = {0};
                     cgltf_accessor_read_float(uvAcc, i, uv, 2);
-                    v->texcoord = HMM_V2(uv[0], 1.0f - uv[1]);   // flip V for most engines
+                    v->texcoord = HMM_V2(uv[0], 1.0f - uv[1]);
                 }
 
                 if (jointAcc) {
                     unsigned int j[4] = {0};
                     cgltf_accessor_read_uint(jointAcc, i, j, 4);
-                    v->joints[0] = (uint8_t)j[0];  // usually cast to uint8_t or uint16_t depending on your Vertex struct
+                    v->joints[0] = (uint8_t)j[0];
                     v->joints[1] = (uint8_t)j[1];
                     v->joints[2] = (uint8_t)j[2];
                     v->joints[3] = (uint8_t)j[3];
@@ -353,11 +384,12 @@ Model load_gltf_model(Arena* arena, const char* path)
             }
 
             // Indices
+            int primTris = 0;
             if (prim->indices) {
-                int primTris = (int)prim->indices->count / 3;
+                primTris = (int)prim->indices->count / 3;
                 for (int i = 0; i < primTris; ++i) {
                     unsigned int a, b, c;
-                    cgltf_accessor_read_uint(prim->indices, i*3+0, &a, 1);
+                    cgltf_accessor_read_uint(prim->indices, i*3, &a, 1);
                     cgltf_accessor_read_uint(prim->indices, i*3+1, &b, 1);
                     cgltf_accessor_read_uint(prim->indices, i*3+2, &c, 1);
 
@@ -367,21 +399,52 @@ Model load_gltf_model(Arena* arena, const char* path)
                         (int)c + vertOffset
                     };
                 }
-                triOffset += primTris;
             }
+
+            // === Material Index + Color ===
+            int materialIndex = 0;
+            if (prim->material) {
+                materialIndex = (int)(prim->material - data->materials);  // calculate index
+            }
+
+            // Material Color - packed like your working renderer
+            unsigned int color = 0xFFFFFFFF;
+            if (prim->material && prim->material->has_pbr_metallic_roughness)
+            {
+                cgltf_pbr_metallic_roughness* pbr = &prim->material->pbr_metallic_roughness;
+                int r = (int)(pbr->base_color_factor[0] * 255.0f);
+                int g = (int)(pbr->base_color_factor[1] * 255.0f);
+                int b = (int)(pbr->base_color_factor[2] * 255.0f);
+                color = (b << 16) | (g << 8) | r;
+            }
+
+            if (model.mesh.primitiveCount < 16) {
+                model.mesh.primitives[model.mesh.primitiveCount++] = {
+                    vertOffset, 
+                    triOffset, 
+                    primTris, 
+                    materialIndex,
+                    color
+                };
+            }
+
             vertOffset += primVerts;
+            triOffset  += primTris;
         }
     }
 
-    // === Extract Skeleton & Animations ===
+    // Extract materials for shader baseColorFactor
+    extract_materials(data, &model.mesh);
+
+    // Extract skeleton & animations
     extract_skeleton(data, &model.skeleton);
     extract_animations(data, &model);
 
     cgltf_free(data);
 
-    SDL_Log("Successfully loaded glTF model: %d verts, %d tris, %d joints, %d animations",
+    SDL_Log("Successfully loaded glTF model: %d verts, %d tris, %d primitives, %d joints, %d animations",
             model.mesh.vertCount, model.mesh.triCount,
-            model.skeleton.jointCount, model.animCount);
+            model.mesh.primitiveCount, model.skeleton.jointCount, model.animCount);
 
     return model;
 }
@@ -438,6 +501,7 @@ bool upload_model_to_gpu(VulkanEngine* engine, Model* model)
     return true;
 }
 
+/*
 bool
 load_model(Model *m, const char *path)
 {
@@ -587,3 +651,4 @@ load_room(Model *m, const char *path)
     cgltf_free(data);
     return true;
 }
+*/

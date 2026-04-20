@@ -71,12 +71,19 @@ struct Animation
     float        duration;
 };
 
+struct Material
+{
+    HMM_Vec4 baseColorFactor = HMM_V4(1.0f, 1.0f, 1.0f, 1.0f);
+    // We can add more later: metallicFactor, roughnessFactor, etc.
+};
+
 struct Primitive
 {
     int          vertOffset;
     int          triOffset;
     int          triCount;
-    unsigned int color;   // ARGB
+    int          materialIndex = 0;
+    unsigned int color;   // keep as unsigned int if you prefer ARGB packing
 };
 
 // mesh
@@ -86,8 +93,12 @@ struct Mesh
     int        vertCount;
     Tri       *tris;
     int        triCount;
+
     Primitive  primitives[16];
     int        primitiveCount;
+
+    Material   materials[8];
+    int        materialCount = 0;
 };
 
 // Skeleton
@@ -107,7 +118,7 @@ struct Transform
 struct Pose
 {
     Transform *joints;         // local space transforms
-    HMM_Mat4  *skinMatrices;   // final skinning matrices (one per joint)
+    std::vector<HMM_Mat4>  skinMatrices;   // final skinning matrices (one per joint)
     int        jointCount;
 };
 
@@ -156,6 +167,11 @@ struct Model
     VkBuffer          uniformBuffer = VK_NULL_HANDLE;
     VmaAllocation     uniformBufferAlloc = VK_NULL_HANDLE;
     void*             uniformMapped = nullptr;
+
+    // glTF textures
+    VkImage     textureImage = VK_NULL_HANDLE;
+    VkImageView textureImageView = VK_NULL_HANDLE;
+    VkSampler   textureSampler = VK_NULL_HANDLE;
 };
 
 struct GameState
@@ -208,6 +224,7 @@ Model load_gltf_model(Arena* arena, const char* path);   // or Model if you rena
 bool upload_model_to_gpu(VulkanEngine* engine, Model* model);
 
 // You should implement these using HMM:
-void extract_skeleton(cgltf_data* data, Skeleton* skeleton, Arena* arena);
-void extract_animations(cgltf_data* data, Model* model, Arena* arena);
+void extract_materials(cgltf_data* data, Mesh* mesh);
+void extract_skeleton(cgltf_data* data, Skeleton* skeleton);
+void extract_animations(cgltf_data* data, Model* model);
 // void update_pose(Model* model, float time);   // example

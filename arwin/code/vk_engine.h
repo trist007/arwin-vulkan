@@ -64,10 +64,15 @@ struct ShaderData
 {
     HMM_Mat4 projection;
     HMM_Mat4 view;
-    HMM_Mat4 model[3];
+    HMM_Mat4 model;
 
-    HMM_Vec4 lightPos{ 0.0f, -10.0f, 10.0f, 0.0f };
+    HMM_Vec4 lightPos = HMM_V4(5.0f, 10.0f, 10.0f, 1.0f);   // better default position
+
+    // Per-material data - we'll use index 0 for now (single model)
+    //HMM_Vec4 baseColorFactor = HMM_V4(1.0f, 1.0f, 1.0f, 1.0f);
+    HMM_Vec4 baseColorFactor[8];
     uint32_t selected;
+    HMM_Mat4 skinMatrices[64];
 };
 
 struct ShaderDataBuffer
@@ -228,7 +233,7 @@ void initVulkanEngine(VulkanEngine *engine, GameState *gameState);
 void cleanupVulkanEngine(VulkanEngine *engine);
 void howtoCleanupVulkanEngine(VulkanEngine *engine);
 
-void drawHowtoVulkanEngine(VulkanEngine *engine);
+void drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState);
 void runVulkanEngine(VulkanEngine *engine, GameState *gameState);
 FrameData *getCurrentFrame(VulkanEngine *engine);
 

@@ -566,7 +566,7 @@ void runVulkanEngine(VulkanEngine *engine, GameState *gameState) {
     //ImGui::Render();
 
     //drawVulkanEngine(engine);
-    drawHowtoVulkanEngine(engine);
+    drawHowtoVulkanEngine(engine, gameState);
   }
 }
 
@@ -574,55 +574,66 @@ FrameData *getCurrentFrame(VulkanEngine *engine) {
   return &engine->frames[engine->frameIndex % FRAME_OVERLAP];
 }
 
-VertexInputDescription Vertex::get_vertex_description() {
-  VertexInputDescription description = {};
+VertexInputDescription Vertex::get_vertex_description()
+{
+    VertexInputDescription description = {};
 
-  // ====================== BINDING DESCRIPTION ======================
-  VkVertexInputBindingDescription bindingDesc = {};
-  bindingDesc.binding = 0;
-  bindingDesc.stride = sizeof(Vertex);
-  bindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    // Binding 0
+    VkVertexInputBindingDescription binding = {};
+    binding.binding = 0;
+    binding.stride = sizeof(Vertex);
+    binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    description.bindings.push_back(binding);
 
-  description.bindings.push_back(bindingDesc); // ← push into the vector
+    VkVertexInputAttributeDescription attr = {};
 
-  // ====================== ATTRIBUTE DESCRIPTIONS ======================
-  // We need to match the new Vertex struct with HMM_Vec2 texcoord
+    // Location 0: Position
+    attr.location = 0;
+    attr.binding = 0;
+    attr.format = VK_FORMAT_R32G32B32_SFLOAT;
+    attr.offset = offsetof(Vertex, position);
+    description.attributes.push_back(attr);
 
-  VkVertexInputAttributeDescription attr = {};
+    // Location 1: Normal
+    attr.location = 1;
+    attr.binding = 0;
+    attr.format = VK_FORMAT_R32G32B32_SFLOAT;
+    attr.offset = offsetof(Vertex, normal);
+    description.attributes.push_back(attr);
 
-  // Location 0: Position (HMM_Vec3)
-  attr.binding = 0;
-  attr.location = 0;
-  attr.format = VK_FORMAT_R32G32B32_SFLOAT;
-  attr.offset = offsetof(Vertex, position);
-  description.attributes.push_back(attr);
+    // Location 2: Texcoord
+    attr.location = 2;
+    attr.binding = 0;
+    attr.format = VK_FORMAT_R32G32_SFLOAT;
+    attr.offset = offsetof(Vertex, texcoord);
+    description.attributes.push_back(attr);
 
-  // Location 1: Normal (HMM_Vec3)
-  attr.binding = 0;
-  attr.location = 1;
-  attr.format = VK_FORMAT_R32G32B32_SFLOAT;
-  attr.offset = offsetof(Vertex, normal);
-  description.attributes.push_back(attr);
+    // Location 3: Color
+    attr.location = 3;
+    attr.binding = 0;
+    attr.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    attr.offset = offsetof(Vertex, color);
+    description.attributes.push_back(attr);
 
-  // Location 2: Texcoord (HMM_Vec2)
-  attr.binding = 0;
-  attr.location = 2;
-  attr.format = VK_FORMAT_R32G32_SFLOAT;
-  attr.offset = offsetof(Vertex, texcoord);
-  description.attributes.push_back(attr);
+    // Location 4: Joints (uint8x4)
+    attr.location = 4;
+    attr.binding = 0;
+    attr.format = VK_FORMAT_R8G8B8A8_UINT;
+    attr.offset = offsetof(Vertex, joints);
+    description.attributes.push_back(attr);
 
-  // Location 3: Color (HMM_Vec2)
-  attr.binding = 0;
-  attr.location = 3;
-  attr.format = VK_FORMAT_R32G32_SFLOAT;
-  attr.offset = offsetof(Vertex, color);
-  description.attributes.push_back(attr);
+    // Location 5: Weights
+    attr.location = 5;
+    attr.binding = 0;
+    attr.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    attr.offset = offsetof(Vertex, weights);
+    description.attributes.push_back(attr);
 
-  return description;
+    return description;
 }
 
 void
-drawHowtoVulkanEngine(VulkanEngine *engine)
+drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
 {
     // for glb
     /*
@@ -637,6 +648,49 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
 
     // get current frame
     FrameData &currentFrame = engine->frames[engine->frameIndex];
+
+    // === Copy REAL glTF material colors ===
+    int numMaterials = gameState->model.mesh.materialCount;
+    SDL_Log("Copying %d materials to shader", numMaterials);
+
+    for (int m = 0; m < numMaterials && m < 8; ++m)
+    {
+        currentFrame.shaderData.baseColorFactor[m] = 
+            gameState->model.mesh.materials[m].baseColorFactor;
+
+        SDL_Log("Material %d -> shader: %.3f %.3f %.3f", m,
+                currentFrame.shaderData.baseColorFactor[m].X,
+                currentFrame.shaderData.baseColorFactor[m].Y,
+                currentFrame.shaderData.baseColorFactor[m].Z);
+    }
+    // Light position (make sure it's not too far)
+    currentFrame.shaderData.lightPos = HMM_V4(5.0f, 10.0f, 10.0f, 1.0f);
+
+    // Copy skinning matrices
+    int jointCount = gameState->model.skeleton.jointCount;
+
+    for (int j = 0; j < jointCount && j < 64; ++j)
+    {
+        if (j < gameState->model.pose.skinMatrices.size())   // safety check
+        {
+            currentFrame.shaderData.skinMatrices[j] = gameState->model.pose.skinMatrices[j];
+        }
+        else
+        {
+            currentFrame.shaderData.skinMatrices[j] = HMM_M4D(1.0f);  // identity matrix as fallback
+        }
+    }
+
+    // Fill remaining matrices with identity (good practice)
+    for (int j = jointCount; j < 64; ++j)
+    {
+        currentFrame.shaderData.skinMatrices[j] = HMM_M4D(1.0f);
+    }
+
+    // Then copy the whole ShaderData to the uniform buffer
+    memcpy(currentFrame.shaderDataBuffers.allocationInfo.pMappedData, 
+        &currentFrame.shaderData, 
+        sizeof(ShaderData));
 
     // Wait on fence for the last frame the GPU has worked and reset it for the next submission
     VK_CHECK(vkWaitForFences(engine->device, 1, &currentFrame.renderFence, true, UINT64_MAX));
@@ -693,7 +747,10 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     HMM_Scale(HMM_V3(5.0f, 5.0f, 5.0f))
 );
 
-    currentFrame.shaderData.model[0] = modelMat;
+    currentFrame.shaderData.model = modelMat;
+    currentFrame.shaderData.projection = proj;
+    currentFrame.shaderData.view = view;
+
 
     memcpy(currentFrame.shaderDataBuffers.allocationInfo.pMappedData, &currentFrame.shaderData, sizeof(ShaderData));
 
@@ -781,13 +838,40 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->graphicsPipeline);
-    VkDeviceSize vOffset{ 0 };
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->pipelineLayout, 0, 1, &engine->descriptorSetTex, 0, nullptr);
+    VkDeviceSize vOffset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &engine->vBuffer, &vOffset);
     vkCmdBindIndexBuffer(cmd, engine->vBuffer, engine->indexBufferOffset, VK_INDEX_TYPE_UINT32);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->pipelineLayout, 0, 1, &engine->descriptorSetTex, 0, nullptr);
 
-    // draw command
-    vkCmdDrawIndexed(cmd, engine->indexCount, 1, 0, 0, 0);
+    // Draw each primitive with its own material color
+    for (int i = 0; i < gameState->model.mesh.primitiveCount; ++i)
+    {
+            Primitive* prim = &gameState->model.mesh.primitives[i];
+
+        // Unpack the color we stored during loading
+        float r = ((prim->color >>  0) & 0xFF) / 255.0f;
+        float g = ((prim->color >>  8) & 0xFF) / 255.0f;
+        float b = ((prim->color >> 16) & 0xFF) / 255.0f;
+
+        struct PushColor {
+            float r, g, b, a;
+        } push = { r, g, b, 1.0f };
+
+        vkCmdPushConstants(cmd,
+                        engine->pipelineLayout,
+                        VK_SHADER_STAGE_FRAGMENT_BIT,
+                        0,
+                        sizeof(push),
+                        &push);
+
+        vkCmdDrawIndexed(cmd,
+                        prim->triCount * 3,
+                        1,
+                        prim->triOffset * 3,
+                        0,
+                        0);
+    }
+//    vkCmdDrawIndexed(cmd, engine->indexCount, 1, 0, 0, 0);
     vkCmdEndRendering(cmd);
 
     // transition swapchain image that we just used as an attachment
@@ -872,6 +956,14 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     if (gameState->model.mesh.vertCount == 0) {
         SDL_Log("Failed to load glTF model!");
         return false;
+    }
+
+    for(uint32_t i = 0; i < FRAME_OVERLAP; i++)
+    {
+        for(uint32_t m = 0; gameState->model.mesh.materialCount && m < 8; m++)
+        {
+            engine->frames[i].shaderData.baseColorFactor[m] = gameState->model.mesh.materials[m].baseColorFactor;
+        }
     }
 
     // Upload to Vulkan GPU buffers
@@ -1253,67 +1345,95 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     vkUpdateDescriptorSets(engine->device, 2, writes.data(), 0, nullptr);
 
     // Loading shaders
-    slang::createGlobalSession(engine->slangGlobalSession.writeRef());
-    auto slangTargets{ std::to_array<slang::TargetDesc>({ {
-        .format{SLANG_SPIRV},
-        .profile{engine->slangGlobalSession->findProfile("spirv_1_4")}
-    } })};
-    auto slangOptions{ std::to_array<slang::CompilerOptionEntry>({ {
+    Slang::ComPtr<slang::IGlobalSession> globalSession;
+    slang::createGlobalSession(globalSession.writeRef());
+
+    auto targets = std::to_array<slang::TargetDesc>({{
+        .format = SLANG_SPIRV,
+        .profile = globalSession->findProfile("spirv_1_6")
+    }});
+
+    auto options = std::to_array<slang::CompilerOptionEntry>({{
         slang::CompilerOptionName::EmitSpirvDirectly,
         {slang::CompilerOptionValueKind::Int, 1}
-    } })};
-    slang::SessionDesc slangSessionDesc{
-        .targets{slangTargets.data()},
-        .targetCount{SlangInt(slangTargets.size())},
+    }});
+
+    slang::SessionDesc sessionDesc{
+        .targets = targets.data(),
+        .targetCount = SlangInt(targets.size()),
         .defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR,
-        .compilerOptionEntries{slangOptions.data()},
-        .compilerOptionEntryCount{uint32_t(slangOptions.size())}
+        .compilerOptionEntries = options.data(),
+        .compilerOptionEntryCount = uint32_t(options.size())
     };
+
     Slang::ComPtr<slang::ISession> slangSession;
-    engine->slangGlobalSession->createSession(slangSessionDesc, slangSession.writeRef());
+    globalSession->createSession(sessionDesc, slangSession.writeRef());
 
     Slang::ComPtr<ISlangBlob> diagnosticsBlob;
 
-    SDL_Log("Loading shader current working dir: %s", SDL_GetCurrentDirectory());
-    // get shader of slang format which includes both vertex and fragment in one file
-    Slang::ComPtr<slang::IModule> slangModule{
-        slangSession->loadModuleFromSource("triangle", "../data/assets/shader.slang", nullptr, diagnosticsBlob.writeRef())
-    };
+    SDL_Log("Compiling shader from source: shader.slang");
 
-    if (!slangModule) {
-        const char* diagMsg = diagnosticsBlob ? (const char*)diagnosticsBlob->getBufferPointer() : "No diagnostics";
-        SDL_Log("ERROR: Failed to load Slang module 'shader.slang'");
-        SDL_Log("Diagnostics: %s", diagMsg);
-        abort();   // or return false;
+    // Read the file ourselves so it always gets the latest version
+    size_t sourceSize = 0;
+    void* sourceData = SDL_LoadFile("../data/assets/shader.slang", &sourceSize);
+    if (!sourceData)
+    {
+        SDL_Log("Failed to read shader.slang: %s", SDL_GetError());
+        abort();
     }
 
-    SDL_Log("Slang module loaded successfully");
+    Slang::ComPtr<slang::IModule> slangModule; 
+    {
+        Slang::ComPtr<ISlangBlob> diagnosticsBlob;
 
-        // compile shader
-        Slang::ComPtr<ISlangBlob> spirv;
-        slangModule->getTargetCode(0, spirv.writeRef());
+        // this will recompile the shader code into a slang modeul
+        slangModule = slangSession->loadModuleFromSourceString(
+            "shader",                                 // module name (can be anything)
+            "../data/assets/shader.slang",            // "path" for diagnostics / error messages
+            (const char*)sourceData,                  // source code
+            diagnosticsBlob.writeRef());
 
-    // create shader module
+        if (!slangModule)
+        {
+            const char* diagMsg = diagnosticsBlob 
+                ? (const char*)diagnosticsBlob->getBufferPointer() 
+                : "No diagnostics";
+            SDL_Log("ERROR: Failed to compile shader.slang");
+            SDL_Log("Diagnostics: %s", diagMsg);
+            abort();
+        }
+    }
+
+    SDL_free(sourceData);   // important: free SDL's allocation
+
+    SDL_Log("Shader compiled successfully");
+
+    // Get SPIR-V
+    Slang::ComPtr<ISlangBlob> spirv;
+    slangModule->getTargetCode(0, spirv.writeRef());
+
+    // Create Vulkan shader module (rest of your code stays the same)
     VkShaderModuleCreateInfo shaderModuleCI{
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = spirv->getBufferSize(),
-        .pCode = (uint32_t*)spirv->getBufferPointer()
+        .pCode = (const uint32_t*)spirv->getBufferPointer()
     };
 
     VK_CHECK(vkCreateShaderModule(engine->device, &shaderModuleCI, nullptr, &engine->shaderModule));
 
+    SDL_Log("Vulkan shader module created successfully");
+
     VkPushConstantRange pushConstantRange{
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .size = sizeof(VkDeviceAddress)
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset     = 0,
+        .size =       sizeof(float) * 4
     };
     VkPipelineLayoutCreateInfo pipelineLayoutCI{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
         .pSetLayouts = &engine->descriptorSetLayoutTex,
-        .pushConstantRangeCount = 0,
-        //.pushConstantRangeCount = 1,
-        .pPushConstantRanges = nullptr,
-        //.pPushConstantRanges = &pushConstantRange
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pushConstantRange 
     };
     VK_CHECK(vkCreatePipelineLayout(engine->device, &pipelineLayoutCI, nullptr, &engine->pipelineLayout));
 
@@ -1324,9 +1444,48 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     };
 
     std::vector<VkVertexInputAttributeDescription> vertexAttributes{
-        { .location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT },
-        { .location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, normal) },
-        { .location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(Vertex, texcoord) },
+        // Location 0: Position
+        {
+            .location = 0,
+            .binding  = 0,
+            .format   = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset   = offsetof(Vertex, position)
+        },
+        // Location 1: Normal
+        {
+            .location = 1,
+            .binding  = 0,
+            .format   = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset   = offsetof(Vertex, normal)
+        },
+        // Location 2: Texcoord
+        {
+            .location = 2,
+            .binding  = 0,
+            .format   = VK_FORMAT_R32G32_SFLOAT,
+            .offset   = offsetof(Vertex, texcoord)
+        },
+        // Location 3: Color
+        {
+            .location = 3,
+            .binding  = 0,
+            .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
+            .offset   = offsetof(Vertex, color)
+        },
+        // Location 4: Joints (uint8_t[4])
+        {
+            .location = 4,
+            .binding  = 0,
+            .format   = VK_FORMAT_R8G8B8A8_UINT,
+            .offset   = offsetof(Vertex, joints)
+        },
+        // Location 5: Weights
+        {
+            .location = 5,
+            .binding  = 0,
+            .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
+            .offset   = offsetof(Vertex, weights)
+        }
     };
 
     VkPipelineVertexInputStateCreateInfo vertexInputState{
@@ -1342,13 +1501,14 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
     };
 
+    // Entry points in the shaders
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages{
         { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         .stage = VK_SHADER_STAGE_VERTEX_BIT,
-        .module = engine->shaderModule, .pName = "main"},
+        .module = engine->shaderModule, .pName = "VSMain"},
         { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-        .module = engine->shaderModule, .pName = "main" }
+        .module = engine->shaderModule, .pName = "PSMain" }
     };
 
     // configure viewport state

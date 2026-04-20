@@ -71,11 +71,12 @@ struct Vertex
     HMM_Vec3 normal;
     HMM_Vec2 texcoord;
 
-    HMM_Vec2 color;
+    HMM_Vec4 color = HMM_V4(1.0f, 1.0f, 1.0f, 1.0f);
 
     // skinning
-    int   joints[4];
-    float weights[4];
+    uint8_t   joints[4] = {0,0,0,0};
+    float weights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
     static VertexInputDescription get_vertex_description();
 };
 
