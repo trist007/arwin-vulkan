@@ -17,6 +17,9 @@
 #include "HandmadeMath.h"
 #include <SDL3/SDL.h>
 
+#include "arena.h"
+#include "cgltf.h"
+
 
 #define ArraySize(arr) (uint32_t)(sizeof(arr) / sizeof(arr[0]))
 
@@ -70,6 +73,7 @@ struct Vertex
 
     HMM_Vec2 color;
 
+    // skinning
     int   joints[4];
     float weights[4];
     static VertexInputDescription get_vertex_description();

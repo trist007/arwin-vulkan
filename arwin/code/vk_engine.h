@@ -214,6 +214,7 @@ struct VulkanEngine
 // singleton for pointer retrieval
 VulkanEngine *getVulkanEngine(void);
 
+struct GameState;
 // init functions
 void init_vulkan(VulkanEngine *engine);
 void init_swapchain(VulkanEngine *engine);
@@ -223,12 +224,12 @@ void destroy_swapchain(VulkanEngine *engine);
 void draw_imgui(VulkanEngine *engine, VkCommandBuffer cmd, VkImageView targetImageView);
 void resize_swapchain(VulkanEngine *engine);
 
-void initVulkanEngine(VulkanEngine *engine);
+void initVulkanEngine(VulkanEngine *engine, GameState *gameState);
 void cleanupVulkanEngine(VulkanEngine *engine);
 void howtoCleanupVulkanEngine(VulkanEngine *engine);
 
 void drawHowtoVulkanEngine(VulkanEngine *engine);
-void runVulkanEngine(VulkanEngine *engine);
+void runVulkanEngine(VulkanEngine *engine, GameState *gameState);
 FrameData *getCurrentFrame(VulkanEngine *engine);
 
 // Textures
@@ -236,4 +237,4 @@ AllocatedImage create_image(VulkanEngine *engine, VkExtent3D size, VkFormat form
 AllocatedImage create_image(VulkanEngine *engine, void *data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 void destroy_image(VulkanEngine *engine, const AllocatedImage &img);
 
-bool howtoVulkan(VulkanEngine *engine);
+bool howtoVulkan(VulkanEngine *engine, GameState *gameState);

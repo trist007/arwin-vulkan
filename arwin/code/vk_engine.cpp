@@ -17,6 +17,8 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
 
+#include "vk_loader.h"
+
 #define MAX_SWAPCHAIN_IMAGES 4
 
 constexpr bool bUseValidationLayers = true;
@@ -30,7 +32,7 @@ void sdl_log_stderr(void *userData, int category, SDL_LogPriority priority,
 
 VulkanEngine *getVulkanEngine(void) { return (s_engine); }
 
-void initVulkanEngine(VulkanEngine *engine) {
+void initVulkanEngine(VulkanEngine *engine, GameState *gameState) {
   // redirect SDL_Log to stderr
   SDL_SetLogOutputFunction(sdl_log_stderr, NULL);
 
@@ -50,7 +52,7 @@ void initVulkanEngine(VulkanEngine *engine) {
   // VkBootstrap
   init_vulkan(engine);
   init_swapchain(engine);
-  howtoVulkan(engine);
+  howtoVulkan(engine, gameState);
 
   // everything went fine
   engine->isInitialized = true;
@@ -519,7 +521,7 @@ void howtoCleanupVulkanEngine(VulkanEngine *engine)
     SDL_Quit();
 }
 
-void runVulkanEngine(VulkanEngine *engine) {
+void runVulkanEngine(VulkanEngine *engine, GameState *gameState) {
   SDL_Event e;
   bool bQuit = false;
 
@@ -623,11 +625,11 @@ void
 drawHowtoVulkanEngine(VulkanEngine *engine)
 {
     // for glb
+    /*
     vkCmdBindVertexBuffers(cmd, 0, 1, &engine->vBuffer, &vOffset);  // vOffset = 0
     vkCmdBindIndexBuffer(cmd, engine->vBuffer, engine->indexBufferOffset, VK_INDEX_TYPE_UINT32);  // note: uint32 now
     vkCmdDrawIndexed(cmd, engine->indexCount, 1, 0, 0, 0);   // instanceCount = 1 for now
 
-    /*
     I used VK_INDEX_TYPE_UINT32 because glTF often has more than 65k vertices.
     If you want to support multiple meshes later, we can extend upload_gltf_to_gpu to create separate buffers per mesh.
     Skinning (joints/weights) is already in the Vertex struct, so you can add the skinning matrix uniform later.
@@ -662,29 +664,36 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
 
     engine->imageIndex = imageIndex;
 
-    // Update shader data
-    currentFrame.shaderData.projection = HMM_Perspective_RH_ZO(
-        HMM_AngleDeg(45.0f),
-        (float)engine->windowExtent.width / (float)engine->windowExtent.height,
+    // Camera and Projection
+    float aspect = (float)engine->windowExtent.width / (float)engine->windowExtent.height;
+
+    HMM_Mat4 proj = HMM_Perspective_RH_ZO(
+        HMM_AngleDeg(60.0f),
+        aspect,
         0.1f,
-        32.0f
+        1000.0f
     );
-    currentFrame.shaderData.view = HMM_Translate(HMM_V3(engine->camPos.X, engine->camPos.Y, engine->camPos.Z));
 
-    // create 3 monkey heads
-    for (uint32_t i = 0; i < 3; i++) {
+    proj.Elements[1][1] *= -1.0f;                    // ← Critical: Flip Y for Vulkan
 
-        // set positions of each
-        HMM_Vec3 instancePos = HMM_V3(
-            (i - 1) * 3.0f,
-            0.0f,
-            0.0f
-        );
+    HMM_Mat4 view = HMM_LookAt_RH(
+        HMM_V3(0.0f, 3.0f, 10.0f),      // camera position (move back!)
+        HMM_V3(0.0f, 0.0f, 0.0f),       // look at origin
+        HMM_V3(0.0f, 1.0f, 0.0f)
+    );
 
-        HMM_Quat rotation = HMM_Q(0.0f, 0.0f, 0.0f, 1.0f);
+    currentFrame.shaderData.projection = proj;
+    currentFrame.shaderData.view = view;
 
-        currentFrame.shaderData.model[i] = HMM_Translate(instancePos) * HMM_QToM4(rotation);
-    }
+    // Placement single mode matrix
+    HMM_Vec3 pos = HMM_V3(0.0f, -5.0f, 0.0f);
+
+    HMM_Mat4 modelMat = HMM_MulM4(
+    HMM_Translate(pos),
+    HMM_Scale(HMM_V3(5.0f, 5.0f, 5.0f))
+);
+
+    currentFrame.shaderData.model[0] = modelMat;
 
     memcpy(currentFrame.shaderDataBuffers.allocationInfo.pMappedData, &currentFrame.shaderData, sizeof(ShaderData));
 
@@ -775,10 +784,10 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     VkDeviceSize vOffset{ 0 };
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->pipelineLayout, 0, 1, &engine->descriptorSetTex, 0, nullptr);
     vkCmdBindVertexBuffers(cmd, 0, 1, &engine->vBuffer, &vOffset);
-    vkCmdBindIndexBuffer(cmd, engine->vBuffer, engine->indexBufferOffset, VK_INDEX_TYPE_UINT16);
+    vkCmdBindIndexBuffer(cmd, engine->vBuffer, engine->indexBufferOffset, VK_INDEX_TYPE_UINT32);
 
     // draw command
-    vkCmdDrawIndexed(cmd, engine->indexCount, 3, 0, 0, 0);
+    vkCmdDrawIndexed(cmd, engine->indexCount, 1, 0, 0, 0);
     vkCmdEndRendering(cmd);
 
     // transition swapchain image that we just used as an attachment
@@ -839,7 +848,7 @@ drawHowtoVulkanEngine(VulkanEngine *engine)
     engine->frameIndex = (engine->frameIndex + 1) % FRAME_OVERLAP;
 }
 
-bool howtoVulkan(VulkanEngine *engine)
+bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
 {
     engine->attrib;
     engine->shapes;
@@ -858,99 +867,21 @@ bool howtoVulkan(VulkanEngine *engine)
 
     // === REPLACE WITH THIS ===
 
-    LoadedModel myModel = load_gltf_model(&gArena, "../data/models/your_model.glb");  // ← change path
+    gameState->model = load_gltf_model(gameState->arena, "../data/models/arwin8.glb");  // ← change path
 
-    if (myModel.mesh.vertCount == 0) {
+    if (gameState->model.mesh.vertCount == 0) {
         SDL_Log("Failed to load glTF model!");
         return false;
     }
 
     // Upload to Vulkan GPU buffers
-    if (!upload_gltf_to_gpu(engine, &myModel)) {
+    if (!upload_model_to_gpu(engine, &gameState->model)) {
         SDL_Log("Failed to upload glTF mesh to GPU");
         return false;
     }
 
     SDL_Log("Successfully loaded and uploaded glTF model with %d vertices, %d indices", 
-            myModel.mesh.vertCount, myModel.mesh.triCount);
-
-    // load obj
-    result = tinyobj::LoadObj(&engine->attrib, &engine->shapes, &engine->materials, &warn, &err, "../data/assets/suzanne.obj", "../data/assets");
-
-    if (!warn.empty()) {
-        std::cout << "Warning: " << warn << std::endl;
-    }
-    if (!err.empty()) {
-        std::cerr << "Error: " << err << std::endl;
-    }
-    if (!result) {
-        std::cerr << "Failed to load OBJ file!" << std::endl;
-        abort();
-    }
-
-        // At this point, attrib, shapes, and materials contain the model data.
-        // You still need to convert them anto your std::vector<Vertex> and std::vector<uint32_t> indices.
-
-    std::cout << "Loaded " << engine->shapes.size() << " shape(s) successfully!" << std::endl;
-    std::cout << "Loaded " << engine->materials.size() << " material(s) successfully!" << std::endl;
-        // interleaved vertex attributes, for every vertex three floats for the position are followed by three floats for
-    // the normal vector (used for lighting), which in turn is followed by two floats for texture coordinates
-    const VkDeviceSize indexCount{engine->shapes[0].mesh.indices.size()};
-    std::vector<Vertex> vertices{};
-    std::vector<uint16_t> indices{};
-
-    // Load vertex and index data
-    for(auto& index : engine->shapes[0].mesh.indices)
-    {
-        Vertex v{
-            .position = HMM_V3(
-                engine->attrib.vertices[index.vertex_index * 3],
-                -engine->attrib.vertices[index.vertex_index * 3 + 1],   // flip Y (common for OBJ)
-                engine->attrib.vertices[index.vertex_index * 3 + 2]
-            ),
-
-            .normal = HMM_V3(
-                engine->attrib.normals[index.normal_index * 3],
-                -engine->attrib.normals[index.normal_index * 3 + 1],    // flip Y
-                engine->attrib.normals[index.normal_index * 3 + 2]
-            ),
-
-            .texcoord = HMM_V2(
-                engine->attrib.texcoords[index.texcoord_index * 2],
-                1.0f - engine->attrib.texcoords[index.texcoord_index * 2 + 1]  // flip V (OBJ uses bottom-left origin)
-            ),
-
-            .color = HMM_V2(1.0f, 1.0f)   // default white / unused for now
-        };
-        vertices.push_back(v);
-        indices.push_back(index.vertex_index);
-        //indices.push_back(indices.size());
-    }
-
-    // Saving to engine
-    engine->vertexBufferSize = sizeof(Vertex) * vertices.size();
-    engine->indexBufferOffset = engine->vertexBufferSize;
-    engine->indexCount = (uint32_t)(indices.size());
-
-    // Upload data to the GPU via buffers
-    VkDeviceSize vBufSize{ sizeof(Vertex) * vertices.size() };
-    VkDeviceSize iBufSize{ sizeof(uint16_t) * indices.size() };
-    VkBufferCreateInfo bufferCI{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = vBufSize + iBufSize,
-        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT
-    };
-
-    VmaAllocationCreateInfo vBufferAllocCI{
-        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        .usage = VMA_MEMORY_USAGE_AUTO
-    };
-
-    VmaAllocationInfo vBufferAllocInfo{};
-    VK_CHECK(vmaCreateBuffer(engine->allocator, &bufferCI, &vBufferAllocCI, &engine->vBuffer, &engine->vBufferAllocation, &vBufferAllocInfo));
-
-    memcpy(vBufferAllocInfo.pMappedData, vertices.data(), vBufSize);
-    memcpy(((char*)vBufferAllocInfo.pMappedData) + vBufSize, indices.data(), iBufSize);
+            gameState->model.mesh.vertCount, gameState->model.mesh.triCount);
 
     for (uint32_t i = 0; i < FRAME_OVERLAP; i++) {
         VkBufferCreateInfo uBufferCI{
@@ -1457,6 +1388,10 @@ bool howtoVulkan(VulkanEngine *engine)
     };
     VkPipelineRasterizationStateCreateInfo rasterizationState{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_NONE,      // ← Disable culling for testing
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .lineWidth = 1.0f
     };
     VkPipelineMultisampleStateCreateInfo multisampleState{
@@ -1528,7 +1463,7 @@ resize_swapchain(VulkanEngine *engine)
 
     // Recreate depth image
     engine->depthImage = create_image(engine, newExtent, 
-                                      depthFormat,
+                                      engine->depthFormat,
                                       VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 
                                       false);
 
