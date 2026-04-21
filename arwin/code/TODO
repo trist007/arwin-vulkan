@@ -1,5 +1,84 @@
-for text rendering in SDL3
-TTF_Font → SDL_Surface → SDL_Texture → SDL_GPU renders it
+Issues with text rendering
 
-for text rendering in Vulkan
-TTF_Font → SDL_Surface → VkImage → your pipeline renders it
+Quad positioning / NDC conversion is incorrect (causing the atlas parts to appear in wrong places and orientations).
+Alpha blending is not clean (striations on the triangle).
+
+fragment shader is outputting zero color/alpha, or the blend state is discarding everything.
+
+
+
+Adding more 3d models like monsters
+
+Step-by-step: Adding a Third Model1. Add it to GameStatecpp
+
+struct GameState
+{
+    Model player;      // was "model"
+    Model room;
+    Model enemy;       // ← NEW third model
+
+    // ... other fields
+};
+
+2. Load it in howtoVulkan()cpp
+
+// Load all models
+gameState->player = load_gltf_model(gameState->arena, "../data/models/arwin8.glb");
+gameState->room   = load_gltf_model(gameState->arena, "../data/models/room5.glb");
+gameState->enemy  = load_gltf_model(gameState->arena, "../data/models/enemy.glb");   // change path
+
+// Upload all of them
+upload_model_to_gpu(engine, &gameState->player);
+upload_model_to_gpu(engine, &gameState->room);
+upload_model_to_gpu(engine, &gameState->enemy);
+
+3. Draw all of them in drawHowtoVulkanEngineHere's the clean pattern:cpp
+
+// Draw Room
+DrawModel(engine, cmd, &gameState->room);
+
+// Draw Player
+DrawModel(engine, cmd, &gameState->player);
+
+// Draw Enemy (with different transform if needed)
+DrawModel(engine, cmd, &gameState->enemy);
+
+Best Practice: Create a Helper FunctionAdd this helper function (put it in vk_engine.cpp or a new file):cpp
+
+void DrawModel(VulkanEngine* engine, VkCommandBuffer cmd, Model* model)
+{
+    if (model->mesh.vertCount == 0) return;
+
+    VkDeviceSize vOffset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &model->vertexBuffer, &vOffset);
+    vkCmdBindIndexBuffer(cmd, model->vertexBuffer, model->indexBufferOffset, VK_INDEX_TYPE_UINT32);
+
+    for (int i = 0; i < model->mesh.primitiveCount; ++i)
+    {
+        Primitive* prim = &model->mesh.primitives[i];
+
+        float r = ((prim->color >>  0) & 0xFF) / 255.0f;
+        float g = ((prim->color >>  8) & 0xFF) / 255.0f;
+        float b = ((prim->color >> 16) & 0xFF) / 255.0f;
+
+        struct PushColor { float r, g, b, a; } push = { r, g, b, 1.0f };
+
+        vkCmdPushConstants(cmd, engine->pipelineLayout, 
+                           VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
+
+        vkCmdDrawIndexed(cmd, prim->triCount * 3, 1, prim->triOffset * 3, 0, 0);
+    }
+}
+
+Then your draw loop becomes very clean:cpp
+
+// Inside drawHowtoVulkanEngine after binding pipeline + descriptor set:
+
+DrawModel(engine, cmd, &gameState->room);
+DrawModel(engine, cmd, &gameState->player);
+DrawModel(engine, cmd, &gameState->enemy);
+
+Extra Tips for Multiple ModelsYou can pass a model matrix per model if you want them at different positions/scales.
+For animated models, you’ll need to update skinning matrices per model.
+For performance with many models, you can combine static ones into one big buffer later.
+
