@@ -233,6 +233,9 @@ struct VulkanEngine
     bool hasOpenGL = false;
     GameFont font;
     int pixelHeight = 24;
+    VkBuffer  stagingBuffer = VK_NULL_HANDLE;
+    VmaAllocation stagingAlloc = VK_NULL_HANDLE;
+
 };
 
 // singleton for pointer retrieval

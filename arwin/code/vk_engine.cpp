@@ -901,8 +901,6 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
     // draw text
     
    // Disable depth completely for text
-    vkCmdSetDepthTestEnable(cmd, VK_FALSE);
-    vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
     
     /*
   {
@@ -964,8 +962,8 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
   }  
     */
         
-   {
-        SDL_Log("=== DRAWING SOLID RED QUAD WITH HMM_Vec2 ===");
+    /*
+    SDL_Log("=== DRAWING SOLID RED QUAD WITH HMM_Vec2 ===");
 
     TextVertex quad[6] = {
         { HMM_V2(-0.9f,  0.9f), HMM_V2(0.0f, 1.0f) },   // top-left  -> bottom-left UV
@@ -1014,14 +1012,18 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
 
     vkCmdDraw(cmd, 6, 1, 0, 0);
 
-    vmaDestroyBuffer(engine->allocator, stagingBuffer, stagingAlloc);
+
 
     SDL_Log("Solid red quad submitted");
-   } 
+    */
 
     SDL_Log("=== Now trying real DrawText ===");
 
     // Add this line:
+    vkCmdSetDepthTestEnable(cmd, VK_FALSE);
+    vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
+    VkBuffer  tempStagingBuffer = engine->stagingBuffer;
+    VmaAllocation tempStagingAlloc = engine->stagingAlloc;
     DrawText(engine, cmd, &engine->fontAtlas, "HELLO", 100.0f, 100.0f, 1.0f, 1.0f, 1.0f);
 
     //SDL_Log("Before DrawText - textPipeline = %p, textPipelineLayout = %p, textDescriptorSet = %p", 
@@ -1050,6 +1052,8 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
 
     // end command buffer
     vkEndCommandBuffer(cmd);
+
+    vmaDestroyBuffer(engine->allocator, tempStagingBuffer, tempStagingAlloc);
 
     // Submit command buffer
     VkPipelineStageFlags waitStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -1927,23 +1931,20 @@ void DrawText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
         float charX = cursorX + g->xoff;
         float charY = cursorY - g->yoff;
 
-        float x0 = (charX / engine->windowExtent.width) * 2.0f - 1.0f;
+        float x0 = (charX / engine->windowExtent.width)  * 2.0f - 1.0f;
         float y0 = 1.0f - (charY / engine->windowExtent.height) * 2.0f;
-        float x1 = ((charX + g->width) / engine->windowExtent.width) * 2.0f - 1.0f;
+        float x1 = ((charX + g->width)  / engine->windowExtent.width)  * 2.0f - 1.0f;
         float y1 = 1.0f - ((charY + g->height) / engine->windowExtent.height) * 2.0f;
 
-        // Same V-flip logic that made the full atlas right-side up
+        // V-flip UVs (your current logic looks correct for many atlases)
         float u0 = g->u0;
-        float v0 = g->v1;   // flip V
+        float v0 = g->v1;
         float u1 = g->u1;
-        float v1 = g->v0;   // flip V
+        float v1 = g->v0;
 
         const float inset = 4.0f / (float)atlas->atlasWidth;
-
-        u0 += inset;
-        v0 -= inset;   // because we flipped
-        u1 -= inset;
-        v1 += inset;
+        u0 += inset;  v0 -= inset;
+        u1 -= inset;  v1 += inset;
 
         verts[vertCount++] = {{x0, y0}, {u0, v0}};
         verts[vertCount++] = {{x1, y0}, {u1, v0}};
@@ -1953,7 +1954,7 @@ void DrawText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
         verts[vertCount++] = {{x1, y1}, {u1, v1}};
         verts[vertCount++] = {{x0, y1}, {u0, v1}};
 
-        cursorX += g->width;
+        cursorX += g->width;   // or better: g->advance if you have it
     }
 
     if (vertCount == 0) return;
@@ -1967,14 +1968,14 @@ void DrawText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipelineLayout,
                             0, 1, &engine->textDescriptorSet, 0, nullptr);
 
-    VkBuffer stagingBuffer;
-    VmaAllocation stagingAlloc;
-    void* mapped;
+    // ====================== CREATE STAGING BUFFER ======================
+    //VkBuffer stagingBuffer;
+    //VmaAllocation stagingAlloc;
 
     VkBufferCreateInfo stagingCI = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = vertCount * sizeof(TextVertex),
-        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT   // ← add VERTEX_BUFFER_BIT
     };
 
     VmaAllocationCreateInfo stagingAllocCI = {
@@ -1983,17 +1984,28 @@ void DrawText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
     };
 
     VK_CHECK(vmaCreateBuffer(engine->allocator, &stagingCI, &stagingAllocCI,
-                             &stagingBuffer, &stagingAlloc, nullptr));
+                             &engine->stagingBuffer, &engine->stagingAlloc, nullptr));
 
-    vmaMapMemory(engine->allocator, stagingAlloc, &mapped);
+    void* mapped;
+    vmaMapMemory(engine->allocator, engine->stagingAlloc, &mapped);
     memcpy(mapped, verts, vertCount * sizeof(TextVertex));
-    vmaUnmapMemory(engine->allocator, stagingAlloc);
+    vmaUnmapMemory(engine->allocator, engine->stagingAlloc);
 
+    // ====================== BIND VERTEX BUFFER ======================
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &engine->stagingBuffer, &offset);   // ← THIS WAS MISSING!
+
+    // Draw all characters at once (very efficient)
     vkCmdDraw(cmd, vertCount, 1, 0, 0);
 
-    vmaDestroyBuffer(engine->allocator, stagingBuffer, stagingAlloc);
+    // ====================== DESTROY AFTER RECORDING ======================
+    // Move this destruction OUT of DrawText, just like you did for the red quad.
+    // For now (quick fix), you can keep it here temporarily if you want,
+    // but the proper place is after vkEndCommandBuffer in drawHowtoVulkanEngine.
 
-    SDL_Log("Drew '%s' with %d vertices", text, vertCount);
+    //vmaDestroyBuffer(engine->allocator, stagingBuffer, stagingAlloc);
+
+    SDL_Log("Drew '%s' with %d vertices (%d glyphs)", text, vertCount, len);
 }
 
 bool init_opengl(VulkanEngine *engine)
