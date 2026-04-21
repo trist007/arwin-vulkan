@@ -19,6 +19,7 @@
 
 #include "arena.h"
 #include "cgltf.h"
+#include "glad/glad.h"
 
 
 #define ArraySize(arr) (uint32_t)(sizeof(arr) / sizeof(arr[0]))
@@ -62,6 +63,10 @@ struct VertexInputDescription
 {
     std::vector<VkVertexInputBindingDescription> bindings;
     std::vector<VkVertexInputAttributeDescription> attributes;
+};
+
+struct PushColor {
+    float r, g, b, a;
 };
 
 // Mesh Buffers on GPU

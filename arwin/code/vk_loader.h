@@ -2,6 +2,8 @@
 
 #include "vk_types.h"
 #include "vk_engine.h"
+#include "vk_loader.h"
+#include "vk_text.h"
 #include <cstdint>
 #include <vulkan/vulkan_core.h>
 
@@ -10,6 +12,7 @@
 // ================================================================
 // Simple types
 // ================================================================
+
 struct LineVertex
 {
     HMM_Vec3 position;
@@ -148,8 +151,9 @@ struct Model
 
     // GPU side - Vulkan
     VkBuffer          vertexBuffer = VK_NULL_HANDLE;
-    VmaAllocation     vertexBufferAlloc = VK_NULL_HANDLE;
+    VmaAllocation     vertexBufferAllocation = VK_NULL_HANDLE;
     VkDeviceSize      vertexBufferSize = 0;
+    VkDeviceSize      indexBufferOffset = 0;
 
     VkBuffer          indexBuffer = VK_NULL_HANDLE;
     VmaAllocation     indexBufferAlloc = VK_NULL_HANDLE;
@@ -174,11 +178,17 @@ struct Model
     VkSampler   textureSampler = VK_NULL_HANDLE;
 };
 
+struct Player
+{
+    HMM_Vec3 position;
+};
+
 struct GameState
 {
     Arena *arena;
     Model model;
-
+    Model room;
+    Player player;
 };
 
 
@@ -222,9 +232,12 @@ static inline void read_uint(cgltf_accessor* acc, int index, unsigned int* out)
 struct VulkanEngine;
 Model load_gltf_model(Arena* arena, const char* path);   // or Model if you renamed it
 bool upload_model_to_gpu(VulkanEngine* engine, Model* model);
+bool LoadFontAtlas(VulkanEngine *engine, FontAtlas *atlas);
 
 // You should implement these using HMM:
 void extract_materials(cgltf_data* data, Mesh* mesh);
 void extract_skeleton(cgltf_data* data, Skeleton* skeleton);
 void extract_animations(cgltf_data* data, Model* model);
 // void update_pose(Model* model, float time);   // example
+static VkCommandBuffer begin_single_time_commands(VulkanEngine* engine);
+static void end_single_time_commands(VulkanEngine* engine, VkCommandBuffer commandBuffer);

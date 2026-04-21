@@ -70,10 +70,10 @@ void clear(PipelineBuilder *pipe)
     pipe->shaderStages.clear();
 }
 
+/*
 VkPipeline build_pipeline(PipelineBuilder *pipe, VkDevice device)
 {
     // Force correct sType + pNext = nullptr on all state structs
-    /*
     pipe->inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     pipe->inputAssembly.pNext = nullptr;
 
@@ -85,7 +85,6 @@ VkPipeline build_pipeline(PipelineBuilder *pipe, VkDevice device)
 
     pipe->depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     pipe->depthStencil.pNext = nullptr;
-    */
 
     pipe->rasterizer.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     pipe->rasterizer.pNext                   = nullptr;
@@ -102,12 +101,28 @@ VkPipeline build_pipeline(PipelineBuilder *pipe, VkDevice device)
 
     // make viewport state from our stored viewport and scissor.
     // at the moment we wont support multiple viewports or scissors
-    VkPipelineViewportStateCreateInfo viewportState = {};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.pNext = nullptr;
+    // Viewport and Scissor (non-dynamic for text pipeline)
+    VkViewport viewport = {
+        .x = 0.0f,
+        .y = 0.0f,
+        .width = (float)engine->windowExtent.width,
+        .height = (float)engine->windowExtent.height,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f
+    };
 
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
+    VkRect2D scissor = {
+        .offset = {0, 0},
+        .extent = {engine->windowExtent.width, engine->windowExtent.height}
+    };
+
+    VkPipelineViewportStateCreateInfo viewportState = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .pViewports = &viewport,           // ← Fixed
+        .scissorCount = 1,
+        .pScissors = &scissor              // ← Fixed
+    };
 
     // setup dummy color blending. We arent using transparent objects yet
     // the blending is just "no blend", but we do write to the color attachment
@@ -181,6 +196,7 @@ VkPipeline build_pipeline(PipelineBuilder *pipe, VkDevice device)
 
     return newPipeline;
 }
+*/
 
 void set_shaders(PipelineBuilder *pipe, VkShaderModule vertexShader, VkShaderModule fragmentShader)
 {
@@ -300,4 +316,386 @@ void enable_blending_alphablend(PipelineBuilder *pipe)
     pipe->colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
     pipe->colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
     pipe->colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+}
+
+bool create_text_descriptor_layout(VulkanEngine* engine)
+{
+    VkDescriptorSetLayoutBinding bindings[2] = {};
+
+    // Binding 0: Font texture (Combined Image + Sampler)
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layoutCI = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = bindings
+    };
+
+    VK_CHECK(vkCreateDescriptorSetLayout(engine->device, &layoutCI, nullptr, &engine->textDescriptorSetLayout));
+
+    // Allocate the descriptor set
+    VkDescriptorSetAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = engine->descriptorPool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &engine->textDescriptorSetLayout
+    };
+
+    VK_CHECK(vkAllocateDescriptorSets(engine->device, &allocInfo, &engine->textDescriptorSet));
+
+    SDL_Log("Text descriptor layout created successfully");
+    return true;
+}
+
+bool update_text_descriptors(VulkanEngine* engine)
+{
+
+    if (engine->fontAtlas.imageView == VK_NULL_HANDLE) {
+        SDL_Log("ERROR: Font atlas imageView is null - cannot update text descriptor");
+        return false;
+    }
+    if (engine->fontAtlas.sampler == VK_NULL_HANDLE) {
+        SDL_Log("ERROR: Font atlas sampler is null");
+        return false;
+    }
+    if (engine->textDescriptorSet == VK_NULL_HANDLE) {
+        SDL_Log("ERROR: textDescriptorSet is null");
+        return false;
+    }
+
+    VkDescriptorImageInfo imageInfo = {};
+    imageInfo.sampler     = engine->fontAtlas.sampler;
+    imageInfo.imageView   = engine->fontAtlas.imageView;
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet write = {};
+    write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet          = engine->textDescriptorSet;   // ← text set, not the main one
+    write.dstBinding      = 0;
+    write.dstArrayElement = 0;
+    write.descriptorCount = 1;
+    write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo      = &imageInfo;
+
+    vkUpdateDescriptorSets(engine->device, 1, &write, 0, nullptr);
+
+    SDL_Log("Text descriptor set updated with font atlas");
+
+    return true;
+}
+
+bool create_text_pipeline(VulkanEngine* engine)
+{
+    SDL_Log("=== Starting create_text_pipeline ===");
+
+    // ===================================================================
+    // 1. Load dedicated text shader (text.slang)
+    // ===================================================================
+    size_t sourceSize = 0;
+    void* sourceData = SDL_LoadFile("../data/assets/text.slang", &sourceSize);
+    if (!sourceData) {
+        SDL_Log("ERROR: Failed to load ../data/assets/text.slang");
+        return false;
+    }
+
+    // Create Slang session for text shader
+    auto targets = std::to_array<slang::TargetDesc>({{
+        .format = SLANG_SPIRV,
+        .profile = engine->slangGlobalSession->findProfile("spirv_1_6")
+    }});
+
+    auto options = std::to_array<slang::CompilerOptionEntry>({{
+        slang::CompilerOptionName::EmitSpirvDirectly,
+        {slang::CompilerOptionValueKind::Int, 1}
+    }});
+
+    slang::SessionDesc sessionDesc{
+        .targets = targets.data(),
+        .targetCount = SlangInt(targets.size()),
+        .defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR,
+        .compilerOptionEntries = options.data(),
+        .compilerOptionEntryCount = uint32_t(options.size())
+    };
+
+    Slang::ComPtr<slang::ISession> textSession;
+    if (engine->slangGlobalSession->createSession(sessionDesc, textSession.writeRef()) != SLANG_OK || !textSession) {
+        SDL_Log("ERROR: Failed to create text Slang session");
+        SDL_free(sourceData);
+        return false;
+    }
+
+    Slang::ComPtr<slang::IModule> textModule;
+    Slang::ComPtr<ISlangBlob> diagBlob;
+
+    textModule = textSession->loadModuleFromSourceString(
+        "text", 
+        "../data/assets/text.slang", 
+        (const char*)sourceData, 
+        diagBlob.writeRef());
+
+    SDL_free(sourceData);
+
+    if (!textModule) {
+        const char* diag = diagBlob ? (const char*)diagBlob->getBufferPointer() : "No diagnostics";
+        SDL_Log("ERROR: Failed to compile text.slang: %s", diag);
+        return false;
+    }
+
+    // Get SPIR-V
+    Slang::ComPtr<ISlangBlob> spirv;
+    textModule->getTargetCode(0, spirv.writeRef());
+
+    // Create shader module
+    VkShaderModuleCreateInfo shaderCI = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = spirv->getBufferSize(),
+        .pCode = (const uint32_t*)spirv->getBufferPointer()
+    };
+
+    if (vkCreateShaderModule(engine->device, &shaderCI, nullptr, &engine->textShaderModule) != VK_SUCCESS) {
+        SDL_Log("ERROR: Failed to create text shader module");
+        return false;
+    }
+
+    SDL_Log("Text shader loaded successfully");
+
+    // ===================================================================
+    // 2. Pipeline Creation
+    // ===================================================================
+
+    // Vertex input for TextVertex { float2 position; float2 uv; }
+    VkVertexInputBindingDescription bindingDesc = {
+        .binding = 0,
+        .stride = sizeof(TextVertex),
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+    };
+
+    VkVertexInputAttributeDescription attrDescs[2] = {
+        {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(TextVertex, position)},  // location 0
+        {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(TextVertex, uv)}         // location 1
+    };
+
+    VkPipelineVertexInputStateCreateInfo vertexInput = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 1,
+        .pVertexBindingDescriptions = &bindingDesc,
+        .vertexAttributeDescriptionCount = 2,
+        .pVertexAttributeDescriptions = attrDescs
+    };
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .primitiveRestartEnable = VK_FALSE
+    };
+
+    // Viewport and Scissor
+    VkViewport viewport = {
+        .x = 0.0f,
+        .y = 0.0f,
+        .width = (float)engine->windowExtent.width,
+        .height = (float)engine->windowExtent.height,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f
+    };
+
+    VkRect2D scissor = { .offset = {0, 0}, .extent = engine->windowExtent };
+
+    VkPipelineViewportStateCreateInfo viewportState = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .pViewports = &viewport,
+        .scissorCount = 1,
+        .pScissors = &scissor
+    };
+
+    VkPipelineRasterizationStateCreateInfo rasterizer = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_NONE,
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        .lineWidth = 1.0f
+    };
+
+    VkPipelineMultisampleStateCreateInfo multisampling = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
+    };
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_FALSE,
+        .depthWriteEnable = VK_FALSE
+    };
+
+    // Alpha blending for text
+    VkPipelineColorBlendAttachmentState blendAttachment = {
+        .blendEnable         = VK_TRUE,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .colorBlendOp        = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .alphaBlendOp        = VK_BLEND_OP_ADD,
+        .colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | 
+                               VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+    };
+
+    VkPipelineColorBlendStateCreateInfo colorBlending = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &blendAttachment
+    };
+
+    // Push constant for color
+    VkPushConstantRange pushConstant = {
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset = 0,
+        .size = sizeof(PushColor)
+    };
+
+    // Pipeline layout
+    VkPipelineLayoutCreateInfo layoutCI = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &engine->textDescriptorSetLayout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pushConstant
+    };
+
+    VK_CHECK(vkCreatePipelineLayout(engine->device, &layoutCI, nullptr, &engine->textPipelineLayout));
+
+    // Dynamic rendering info
+    VkPipelineRenderingCreateInfo renderingCI = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &engine->swapchainImageFormat,
+        .depthAttachmentFormat = engine->depthFormat
+    };
+
+    // Shader stages
+    VkPipelineShaderStageCreateInfo stages[2] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .module = engine->textShaderModule,
+            .pName = "VSMain"
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = engine->textShaderModule,
+            .pName = "PSMain"
+        }
+    };
+
+    // Final pipeline creation
+    VkGraphicsPipelineCreateInfo pipelineCI = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .pNext = &renderingCI,
+        .stageCount = 2,
+        .pStages = stages,
+        .pVertexInputState = &vertexInput,
+        .pInputAssemblyState = &inputAssembly,
+        .pViewportState = &viewportState,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pDepthStencilState = &depthStencil,
+        .pColorBlendState = &colorBlending,
+        .layout = engine->textPipelineLayout
+    };
+
+    VK_CHECK(vkCreateGraphicsPipelines(engine->device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &engine->textPipeline));
+
+    SDL_Log("Text pipeline created successfully with alpha blending");
+    return true;
+}
+
+// Simple one-time layout transition helper
+void transition_font_atlas(VulkanEngine* engine)
+{
+    if (engine->fontAtlas.image == VK_NULL_HANDLE) {
+        SDL_Log("ERROR: fontAtlasImage is null");
+        return;
+    }
+
+    // Get a command buffer (use your existing immediate / one-time command buffer)
+    VkCommandBuffer cmd = begin_single_time_commands(engine);   // ← You probably already have this helper
+
+    VkImageMemoryBarrier barrier = {
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext               = nullptr,
+        .srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,   // after copy from staging buffer
+        .dstAccessMask       = VK_ACCESS_SHADER_READ_BIT,
+        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,      // or TRANSFER_DST_OPTIMAL if you used it
+        .newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = engine->fontAtlas.image,
+        .subresourceRange    = {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        }
+    };
+
+    vkCmdPipelineBarrier(
+        cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,          // source stage
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,   // destination stage
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier);
+
+    end_single_time_commands(engine, cmd);   // submit and wait (or integrate into your frame cmd buffer)
+
+    SDL_Log("Font atlas transitioned to SHADER_READ_ONLY_OPTIMAL");
+}
+
+// Allocate and begin a one-time command buffer
+static VkCommandBuffer begin_single_time_commands(VulkanEngine* engine)
+{
+    VkCommandBufferAllocateInfo allocInfo = {
+        .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool        = engine->commandPool,          // Use your main command pool
+        .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+
+    VkCommandBuffer commandBuffer;
+    VK_CHECK(vkAllocateCommandBuffers(engine->device, &allocInfo, &commandBuffer));
+
+    VkCommandBufferBeginInfo beginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT   // Important for one-time use
+    };
+
+    VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
+
+    return commandBuffer;
+}
+
+// End, submit, and wait for the one-time command buffer to finish
+static void end_single_time_commands(VulkanEngine* engine, VkCommandBuffer commandBuffer)
+{
+    VK_CHECK(vkEndCommandBuffer(commandBuffer));
+
+    VkSubmitInfo submitInfo = {
+        .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers    = &commandBuffer
+    };
+
+    // Submit to graphics queue and wait for it to finish
+    VK_CHECK(vkQueueSubmit(engine->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueWaitIdle(engine->graphicsQueue));   // Wait for completion (simple but safe for init)
+
+    // Clean up
+    vkFreeCommandBuffers(engine->device, engine->commandPool, 1, &commandBuffer);
 }

@@ -1,6 +1,7 @@
 #include "vk_engine.h"
 #include "vk_images.h"
 #include "vk_initializers.h"
+#include <SDL3/SDL_video.h>
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan_core.h>
 
@@ -24,7 +25,6 @@
 constexpr bool bUseValidationLayers = true;
 
 static VulkanEngine *s_engine = 0;
-
 void sdl_log_stderr(void *userData, int category, SDL_LogPriority priority,
                     const char *message) {
   fprintf(stderr, "%s\n", message);
@@ -32,176 +32,185 @@ void sdl_log_stderr(void *userData, int category, SDL_LogPriority priority,
 
 VulkanEngine *getVulkanEngine(void) { return (s_engine); }
 
-void initVulkanEngine(VulkanEngine *engine, GameState *gameState) {
-  // redirect SDL_Log to stderr
-  SDL_SetLogOutputFunction(sdl_log_stderr, NULL);
+void initVulkanEngine(VulkanEngine *engine, GameState *gameState)
+{
+    // redirect SDL_Log to stderr
+    SDL_SetLogOutputFunction(sdl_log_stderr, NULL);
 
-  assert(s_engine == 0);
-  s_engine = engine;
+    assert(s_engine == 0);
+    s_engine = engine;
 
-  engine->windowExtent.width = 1700;
-  engine->windowExtent.height = 900;
+    engine->windowExtent.width = 1700;
+    engine->windowExtent.height = 900;
 
-  SDL_Init(SDL_INIT_VIDEO);
-  SDL_WindowFlags window_flags =
-      (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+    SDL_Init(SDL_INIT_VIDEO);
+    SDL_WindowFlags window_flags =
+        (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 
-  engine->window = SDL_CreateWindow("Vulkan Engine", engine->windowExtent.width,
-                                    engine->windowExtent.height, window_flags);
+    engine->window = SDL_CreateWindow("Vulkan Engine", engine->windowExtent.width,
+                                        engine->windowExtent.height, window_flags);
 
-  // VkBootstrap
-  init_vulkan(engine);
-  init_swapchain(engine);
-  howtoVulkan(engine, gameState);
+    // VkBootstrap
+    init_vulkan(engine);
+    init_swapchain(engine);
+    howtoVulkan(engine, gameState);
 
-  // everything went fine
-  engine->isInitialized = true;
+    // everything went fine
+    engine->isInitialized = true;
 
-  engine->mainCamera.velocity = {0.0f, 0.0f, 0.0f};
-  engine->mainCamera.position = {0.0f, 0.0f, 5.0f};
+    engine->mainCamera.velocity = {0.0f, 0.0f, 0.0f};
+    engine->mainCamera.position = {0.0f, 0.0f, 5.0f};
 
-  engine->mainCamera.pitch = 0;
-  engine->mainCamera.yaw = 0;
+    engine->mainCamera.pitch = 0;
+    engine->mainCamera.yaw = 0;
 }
 
 void init_vulkan(VulkanEngine *engine) {
-  if (!engine || !engine->window) {
-    SDL_Log("Error: Invalid engine or window passed to init_vulkan\n");
-    return;
-  }
-
-  VkResult result;
-
-  // ------------------- 1. Create Vulkan Instance -------------------
-  uint32_t instanceVersion = 0;
-  vkEnumerateInstanceVersion(&instanceVersion);
-
-  SDL_Log("Vulkan loader supports version %d.%d.%d",
-          VK_VERSION_MAJOR(instanceVersion), VK_VERSION_MINOR(instanceVersion),
-          VK_VERSION_PATCH(instanceVersion));
-
-  uint32_t instanceExtensionsCount{0};
-  const char *const *newinstanceExtensions{
-      SDL_Vulkan_GetInstanceExtensions(&instanceExtensionsCount)};
-  // char const* const* newinstanceExtensions{
-  // SDL_Vulkan_GetInstanceExtensions(&instanceExtensionsCount) };
-
-  uint32_t enabledLayerCount = 0;
-  const char *enabledLayers[1] = {"VK_LAYER_KHRONOS_validation"};
-
-  if (bUseValidationLayers) {
-    enabledLayerCount = 1;
-  }
-
-  VkApplicationInfo appInfo = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-                               .pApplicationName = "SDL3 Vulkan glTF Renderer",
-                               .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
-                               .pEngineName = "Custom Engine",
-                               .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-                               .apiVersion = VK_API_VERSION_1_3};
-
-  VkInstanceCreateInfo instanceCreateInfo = {
-      .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-      .pApplicationInfo = &appInfo,
-      .enabledLayerCount = enabledLayerCount,
-      .ppEnabledLayerNames = enabledLayers,
-      .enabledExtensionCount = instanceExtensionsCount,
-      //.enabledExtensionCount = sizeof(instanceExtensions) /
-      //sizeof(instanceExtensions[0]),
-      .ppEnabledExtensionNames = newinstanceExtensions};
-
-  VK_CHECK(vkCreateInstance(&instanceCreateInfo, NULL, &engine->instance));
-
-  SDL_Log("Vulkan Instance created");
-
-  // ------------------- 2. Create SDL Surface -------------------
-  if (!SDL_Vulkan_CreateSurface(engine->window, engine->instance, nullptr,
-                                &engine->surface)) {
-    SDL_Log("Failed to create Vulkan surface: %s", SDL_GetError());
-    return;
-  }
-
-  SDL_Log("SDL Vulkan Surface created");
-
-  // ------------------- 3. Select Best Physical Device + Queue Family
-  // -------------------
-  uint32_t deviceCount = 0;
-  VK_CHECK(vkEnumeratePhysicalDevices(engine->instance, &deviceCount, nullptr));
-  if (deviceCount == 0) {
-    SDL_Log("Error: no physical devices found");
-    abort();
-  }
-
-  if (deviceCount > MAX_PHYSICAL_DEVICES) {
-    SDL_Log("Warning: Too many physical devices (%u), limiting to %d",
-            deviceCount, MAX_PHYSICAL_DEVICES);
-    deviceCount = MAX_PHYSICAL_DEVICES;
-  }
-
-  SDL_Log("Number of device found: %d", deviceCount);
-
-  VkPhysicalDevice physicalDevices[MAX_PHYSICAL_DEVICES] = {VK_NULL_HANDLE};
-  VK_CHECK(vkEnumeratePhysicalDevices(engine->instance, &deviceCount,
-                                      physicalDevices));
-
-  DeviceInformation deviceInfo = {};
-
-  VkPhysicalDevice chosenDevice = VK_NULL_HANDLE;
-  uint32_t bestQueueFamily = UINT32_MAX;
-  int bestScore = -1;
-
-  for (uint32_t i = 0; i < deviceCount; ++i) {
-    int score = evalDevice(engine->instance, engine->surface,
-                           physicalDevices[i], &deviceInfo);
-
-    SDL_Log("device: %s score = %d", deviceInfo.name, score);
-
-    if (score > bestScore) {
-      bestScore = score;
-      chosenDevice = physicalDevices[i];
-      bestQueueFamily =
-          deviceInfo.queueFamilyIndex; // make sure evalDevice fills this!
+    if (!engine || !engine->window) {
+        SDL_Log("Error: Invalid engine or window passed to init_vulkan\n");
+        return;
     }
-  }
 
-  if (chosenDevice == VK_NULL_HANDLE) {
-    SDL_Log("Error: Could not select a suitable physical device");
-    abort();
-  }
+    VkResult result;
 
-  engine->chosenGPU = chosenDevice;
-  SDL_Log("Selected GPU: %s", deviceInfo.name); // better than printing garbage
+    // ------------------- 1. Create Vulkan Instance -------------------
+    uint32_t instanceVersion = 0;
+    vkEnumerateInstanceVersion(&instanceVersion);
 
-  uint32_t numExt = enableExtCount(&deviceInfo);
+    SDL_Log("Vulkan loader supports version %d.%d.%d",
+            VK_VERSION_MAJOR(instanceVersion), VK_VERSION_MINOR(instanceVersion),
+            VK_VERSION_PATCH(instanceVersion));
 
-  // ------------------- 4. Create Logical Device -------------------
-  if (!createLogicalDevice(engine->chosenGPU, bestQueueFamily, &engine->device,
-                           numExt, &deviceInfo)) {
-    SDL_Log("Failed to create logical device!\n");
-    return;
-  }
+    uint32_t instanceExtensionsCount{0};
+    const char *const *newinstanceExtensions{
+        SDL_Vulkan_GetInstanceExtensions(&instanceExtensionsCount)};
+    // char const* const* newinstanceExtensions{
+    // SDL_Vulkan_GetInstanceExtensions(&instanceExtensionsCount) };
 
-  // ------------------- 5. Retrieve Graphics Queue -------------------
-  engine->graphicsQueueFamily = bestQueueFamily;
-  vkGetDeviceQueue(engine->device, bestQueueFamily, 0, &engine->graphicsQueue);
+    uint32_t enabledLayerCount = 0;
+    const char *enabledLayers[1] = {"VK_LAYER_KHRONOS_validation"};
 
-  SDL_Log("Vulkan initialization completed successfully!");
-  SDL_Log("Graphics Queue Family Index: %u", bestQueueFamily);
+    if (bUseValidationLayers) {
+        enabledLayerCount = 1;
+    }
 
-  // initialize the memory allocator
-  VmaAllocatorCreateInfo allocatorInfo = {};
-  allocatorInfo.physicalDevice = engine->chosenGPU;
-  allocatorInfo.device = engine->device;
-  allocatorInfo.instance = engine->instance;
-  allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
-  vmaCreateAllocator(&allocatorInfo, &engine->allocator);
+    VkApplicationInfo appInfo = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+                                .pApplicationName = "SDL3 Vulkan glTF Renderer",
+                                .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+                                .pEngineName = "Custom Engine",
+                                .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+                                .apiVersion = VK_API_VERSION_1_3};
 
-  // ! NOTE: trist007: [&]() is the lambda [&] is capture by reference which for
-  // a deletion queue ! can be dangerous if the variable goes out of scope
-  // before flush() is called [=] capture by ! value is safter because it copies
-  // the handle by value at push time
-  engine->mainDeletionQueue.push_function(
-      [=]() { vmaDestroyAllocator(engine->allocator); });
+    VkInstanceCreateInfo instanceCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pApplicationInfo = &appInfo,
+        .enabledLayerCount = enabledLayerCount,
+        .ppEnabledLayerNames = enabledLayers,
+        .enabledExtensionCount = instanceExtensionsCount,
+        //.enabledExtensionCount = sizeof(instanceExtensions) /
+        //sizeof(instanceExtensions[0]),
+        .ppEnabledExtensionNames = newinstanceExtensions};
+
+    VK_CHECK(vkCreateInstance(&instanceCreateInfo, NULL, &engine->instance));
+
+    SDL_Log("Vulkan Instance created");
+
+    // ------------------- 2. Create SDL Surface -------------------
+    if (!SDL_Vulkan_CreateSurface(engine->window, engine->instance, nullptr,
+                                    &engine->surface)) {
+        SDL_Log("Failed to create Vulkan surface: %s", SDL_GetError());
+        return;
+    }
+
+    SDL_Log("SDL Vulkan Surface created");
+
+    // ------------------- 3. Select Best Physical Device + Queue Family
+    // -------------------
+    uint32_t deviceCount = 0;
+    VK_CHECK(vkEnumeratePhysicalDevices(engine->instance, &deviceCount, nullptr));
+    if (deviceCount == 0) {
+        SDL_Log("Error: no physical devices found");
+        abort();
+    }
+
+    if (deviceCount > MAX_PHYSICAL_DEVICES) {
+        SDL_Log("Warning: Too many physical devices (%u), limiting to %d",
+                deviceCount, MAX_PHYSICAL_DEVICES);
+        deviceCount = MAX_PHYSICAL_DEVICES;
+    }
+
+    SDL_Log("Number of device found: %d", deviceCount);
+
+    VkPhysicalDevice physicalDevices[MAX_PHYSICAL_DEVICES] = {VK_NULL_HANDLE};
+    VK_CHECK(vkEnumeratePhysicalDevices(engine->instance, &deviceCount,
+                                        physicalDevices));
+
+    DeviceInformation deviceInfo = {};
+
+    VkPhysicalDevice chosenDevice = VK_NULL_HANDLE;
+    uint32_t bestQueueFamily = UINT32_MAX;
+    int bestScore = -1;
+
+    for (uint32_t i = 0; i < deviceCount; ++i) {
+        int score = evalDevice(engine->instance, engine->surface,
+                            physicalDevices[i], &deviceInfo);
+
+        SDL_Log("device: %s score = %d", deviceInfo.name, score);
+
+        if (score > bestScore) {
+        bestScore = score;
+        chosenDevice = physicalDevices[i];
+        bestQueueFamily =
+            deviceInfo.queueFamilyIndex; // make sure evalDevice fills this!
+        }
+    }
+
+    if (chosenDevice == VK_NULL_HANDLE) {
+        SDL_Log("Error: Could not select a suitable physical device");
+        abort();
+    }
+
+    engine->chosenGPU = chosenDevice;
+    SDL_Log("Selected GPU: %s", deviceInfo.name); // better than printing garbage
+
+    uint32_t numExt = enableExtCount(&deviceInfo);
+
+    // ------------------- 4. Create Logical Device -------------------
+    if (!createLogicalDevice(engine->chosenGPU, bestQueueFamily, &engine->device,
+                            numExt, &deviceInfo)) {
+        SDL_Log("Failed to create logical device!\n");
+        return;
+    }
+
+    // ------------------- 5. Retrieve Graphics Queue -------------------
+    engine->graphicsQueueFamily = bestQueueFamily;
+    vkGetDeviceQueue(engine->device, bestQueueFamily, 0, &engine->graphicsQueue);
+
+    SDL_Log("Vulkan initialization completed successfully!");
+    SDL_Log("Graphics Queue Family Index: %u", bestQueueFamily);
+
+    // initialize the memory allocator
+    VmaAllocatorCreateInfo allocatorInfo = {};
+    allocatorInfo.physicalDevice = engine->chosenGPU;
+    allocatorInfo.device = engine->device;
+    allocatorInfo.instance = engine->instance;
+    allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    vmaCreateAllocator(&allocatorInfo, &engine->allocator);
+
+    // ! NOTE: trist007: [&]() is the lambda [&] is capture by reference which for
+    // a deletion queue ! can be dangerous if the variable goes out of scope
+    // before flush() is called [=] capture by ! value is safter because it copies
+    // the handle by value at push time
+    engine->mainDeletionQueue.push_function(
+        [=]() { vmaDestroyAllocator(engine->allocator); });
+
+  
+    // initializing SDL3_TTF
+    if (TTF_Init() == -1) {
+        SDL_Log("TTF_Init failed: %s", SDL_GetError());
+    } else {
+        SDL_Log("TTF initialized successfully");
+    }
 }
 
 void init_swapchain(VulkanEngine *engine) {
@@ -518,6 +527,11 @@ void howtoCleanupVulkanEngine(VulkanEngine *engine)
     if (engine->window)
         SDL_DestroyWindow(engine->window);
 
+    if (engine->glContext) {
+        SDL_GL_DestroyContext(engine->glContext);
+        engine->glContext = nullptr;
+    }
+
     SDL_Quit();
 }
 
@@ -651,17 +665,12 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
 
     // === Copy REAL glTF material colors ===
     int numMaterials = gameState->model.mesh.materialCount;
-    SDL_Log("Copying %d materials to shader", numMaterials);
 
     for (int m = 0; m < numMaterials && m < 8; ++m)
     {
         currentFrame.shaderData.baseColorFactor[m] = 
             gameState->model.mesh.materials[m].baseColorFactor;
 
-        SDL_Log("Material %d -> shader: %.3f %.3f %.3f", m,
-                currentFrame.shaderData.baseColorFactor[m].X,
-                currentFrame.shaderData.baseColorFactor[m].Y,
-                currentFrame.shaderData.baseColorFactor[m].Z);
     }
     // Light position (make sure it's not too far)
     currentFrame.shaderData.lightPos = HMM_V4(5.0f, 10.0f, 10.0f, 1.0f);
@@ -825,53 +834,199 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
 
     vkCmdBeginRendering(cmd, &renderingInfo);
 
-    // setting up viewport
-    VkViewport vp{
-        .width = (float)engine->windowExtent.width,
-        .height = (float)engine->windowExtent.height,
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f
-    };
-
+    /*
+    // Set viewport and scissor
+    VkViewport vp = { .width = (float)engine->windowExtent.width, .height = (float)engine->windowExtent.height, .minDepth = 0.0f, .maxDepth = 1.0f };
     vkCmdSetViewport(cmd, 0, 1, &vp);
-    VkRect2D scissor{ .extent{.width = engine->windowExtent.width, .height = engine->windowExtent.height }};
+    VkRect2D scissor = { .extent = { engine->windowExtent.width, engine->windowExtent.height } };
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->graphicsPipeline);
-    VkDeviceSize vOffset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &engine->vBuffer, &vOffset);
-    vkCmdBindIndexBuffer(cmd, engine->vBuffer, engine->indexBufferOffset, VK_INDEX_TYPE_UINT32);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->pipelineLayout, 0, 1, &engine->descriptorSetTex, 0, nullptr);
 
-    // Draw each primitive with its own material color
-    for (int i = 0; i < gameState->model.mesh.primitiveCount; ++i)
+    // === BIND DESCRIPTOR SET (required for shaderData in vertex shader) ===
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->pipelineLayout,
+                            0, 1, &engine->descriptorSetTex, 0, nullptr);
+
+    VkDeviceSize vOffset = 0;
+
+    // === 1. Draw the ROOM ===
+    if (gameState->room.mesh.vertCount > 0)
     {
+        vkCmdBindVertexBuffers(cmd, 0, 1, &gameState->room.vertexBuffer, &vOffset);
+        vkCmdBindIndexBuffer(cmd, gameState->room.vertexBuffer, 
+                            gameState->room.indexBufferOffset, VK_INDEX_TYPE_UINT32);
+
+        for (int i = 0; i < gameState->room.mesh.primitiveCount; ++i)
+        {
+            Primitive* prim = &gameState->room.mesh.primitives[i];
+
+            float r = ((prim->color >>  0) & 0xFF) / 255.0f;
+            float g = ((prim->color >>  8) & 0xFF) / 255.0f;
+            float b = ((prim->color >> 16) & 0xFF) / 255.0f;
+
+            struct PushColor { float r, g, b, a; } push = { r, g, b, 1.0f };
+
+            vkCmdPushConstants(cmd, engine->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
+                            0, sizeof(push), &push);
+
+            vkCmdDrawIndexed(cmd, prim->triCount * 3, 1, prim->triOffset * 3, 0, 0);
+        }
+    }
+/
+    // === 2. Draw the CHARACTER ===
+    if (gameState->model.mesh.vertCount > 0)
+    {
+        vkCmdBindVertexBuffers(cmd, 0, 1, &gameState->model.vertexBuffer, &vOffset);
+        vkCmdBindIndexBuffer(cmd, gameState->model.vertexBuffer, 
+                            gameState->model.indexBufferOffset, VK_INDEX_TYPE_UINT32);
+
+        for (int i = 0; i < gameState->model.mesh.primitiveCount; ++i)
+        {
             Primitive* prim = &gameState->model.mesh.primitives[i];
 
-        // Unpack the color we stored during loading
-        float r = ((prim->color >>  0) & 0xFF) / 255.0f;
-        float g = ((prim->color >>  8) & 0xFF) / 255.0f;
-        float b = ((prim->color >> 16) & 0xFF) / 255.0f;
+            float r = ((prim->color >>  0) & 0xFF) / 255.0f;
+            float g = ((prim->color >>  8) & 0xFF) / 255.0f;
+            float b = ((prim->color >> 16) & 0xFF) / 255.0f;
 
-        struct PushColor {
-            float r, g, b, a;
-        } push = { r, g, b, 1.0f };
+            struct PushColor { float r, g, b, a; } push = { r, g, b, 1.0f };
 
-        vkCmdPushConstants(cmd,
-                        engine->pipelineLayout,
-                        VK_SHADER_STAGE_FRAGMENT_BIT,
-                        0,
-                        sizeof(push),
-                        &push);
+            vkCmdPushConstants(cmd, engine->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
+                            0, sizeof(push), &push);
 
-        vkCmdDrawIndexed(cmd,
-                        prim->triCount * 3,
-                        1,
-                        prim->triOffset * 3,
-                        0,
-                        0);
+            vkCmdDrawIndexed(cmd, prim->triCount * 3, 1, prim->triOffset * 3, 0, 0);
+        }
     }
-//    vkCmdDrawIndexed(cmd, engine->indexCount, 1, 0, 0, 0);
+        */
+
+    // draw text
+    
+   // Disable depth completely for text
+    vkCmdSetDepthTestEnable(cmd, VK_FALSE);
+    vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
+    
+    /*
+  {
+    SDL_Log("=== DRAWING FULL SCREEN RED QUAD WITH CORRECT VERTEX FORMAT ===");
+    // Use the same TextVertex struct as the rest of your code
+    TextVertex quad[6] = {
+        { {-0.9f,  0.9f}, {0.0f, 0.0f} },
+        { { 0.9f,  0.9f}, {1.0f, 0.0f} },
+        { {-0.9f, -0.9f}, {0.0f, 1.0f} },
+
+        { { 0.9f,  0.9f}, {1.0f, 0.0f} },
+        { { 0.9f, -0.9f}, {1.0f, 1.0f} },
+        { {-0.9f, -0.9f}, {0.0f, 1.0f} }
+    };
+
+    struct PushColor push = {1.0f, 0.0f, 0.0f, 1.0f}; // solid red
+
+    // Bind descriptor set (required!)
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
+                            engine->textPipelineLayout, 
+                            0, 1, &engine->textDescriptorSet, 0, nullptr);
+
+    vkCmdPushConstants(cmd, engine->textPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0, sizeof(push), &push);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipeline);
+
+    // Create and bind vertex buffer
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAlloc;
+    void* mapped;
+
+    VkBufferCreateInfo stagingCI = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = 6 * sizeof(TextVertex),
+        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    };
+
+    VmaAllocationCreateInfo stagingAllocCI = {
+        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .usage = VMA_MEMORY_USAGE_AUTO
+    };
+
+    VK_CHECK(vmaCreateBuffer(engine->allocator, &stagingCI, &stagingAllocCI,
+                             &stagingBuffer, &stagingAlloc, nullptr));
+
+    vmaMapMemory(engine->allocator, stagingAlloc, &mapped);
+    memcpy(mapped, quad, 6 * sizeof(TextVertex));
+    vmaUnmapMemory(engine->allocator, stagingAlloc);
+
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &stagingBuffer, &offset);
+
+    vkCmdDraw(cmd, 6, 1, 0, 0);
+
+    vmaDestroyBuffer(engine->allocator, stagingBuffer, stagingAlloc);
+
+    SDL_Log("Full screen red quad submitted");
+  }  
+    */
+        
+   {
+        SDL_Log("=== DRAWING SOLID RED QUAD WITH HMM_Vec2 ===");
+
+    TextVertex quad[6] = {
+        { HMM_V2(-0.9f,  0.9f), HMM_V2(0.0f, 1.0f) },   // top-left  -> bottom-left UV
+        { HMM_V2( 0.9f,  0.9f), HMM_V2(1.0f, 1.0f) },   // top-right -> bottom-right UV
+        { HMM_V2(-0.9f, -0.9f), HMM_V2(0.0f, 0.0f) },   // bottom-left -> top-left UV
+
+        { HMM_V2( 0.9f,  0.9f), HMM_V2(1.0f, 1.0f) },
+        { HMM_V2( 0.9f, -0.9f), HMM_V2(1.0f, 0.0f) },
+        { HMM_V2(-0.9f, -0.9f), HMM_V2(0.0f, 0.0f) }
+    };
+
+    struct PushColor push = {1.0f, 0.0f, 0.0f, 1.0f}; // solid red
+
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
+                            engine->textPipelineLayout, 
+                            0, 1, &engine->textDescriptorSet, 0, nullptr);
+
+    vkCmdPushConstants(cmd, engine->textPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0, sizeof(push), &push);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipeline);
+
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAlloc;
+    void* mapped;
+
+    VkBufferCreateInfo stagingCI = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = 6 * sizeof(TextVertex),
+        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    };
+
+    VmaAllocationCreateInfo stagingAllocCI = {
+        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .usage = VMA_MEMORY_USAGE_AUTO
+    };
+
+    VK_CHECK(vmaCreateBuffer(engine->allocator, &stagingCI, &stagingAllocCI, &stagingBuffer, &stagingAlloc, nullptr));
+
+    vmaMapMemory(engine->allocator, stagingAlloc, &mapped);
+    memcpy(mapped, quad, 6 * sizeof(TextVertex));
+    vmaUnmapMemory(engine->allocator, stagingAlloc);
+
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &stagingBuffer, &offset);
+
+    vkCmdDraw(cmd, 6, 1, 0, 0);
+
+    vmaDestroyBuffer(engine->allocator, stagingBuffer, stagingAlloc);
+
+    SDL_Log("Solid red quad submitted");
+   } 
+
+    SDL_Log("=== Now trying real DrawText ===");
+
+    // Add this line:
+    DrawText(engine, cmd, &engine->fontAtlas, "HELLO", 100.0f, 100.0f, 1.0f, 1.0f, 1.0f);
+
+    //SDL_Log("Before DrawText - textPipeline = %p, textPipelineLayout = %p, textDescriptorSet = %p", 
+    //    (void*)engine->textPipeline, (void*)engine->textPipelineLayout, (void*)engine->textDescriptorSet);
+    //DrawText(engine, cmd, &engine->fontAtlas, "HELLO", 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
     vkCmdEndRendering(cmd);
 
     // transition swapchain image that we just used as an attachment
@@ -934,6 +1089,8 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
 
 bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
 {
+
+
     engine->attrib;
     engine->shapes;
     engine->materials;
@@ -951,29 +1108,37 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
 
     // === REPLACE WITH THIS ===
 
-    gameState->model = load_gltf_model(gameState->arena, "../data/models/arwin8.glb");  // ← change path
+    gameState->model = load_gltf_model(gameState->arena, "../data/models/arwin8.glb");
 
     if (gameState->model.mesh.vertCount == 0) {
         SDL_Log("Failed to load glTF model!");
         return false;
     }
 
-    for(uint32_t i = 0; i < FRAME_OVERLAP; i++)
-    {
-        for(uint32_t m = 0; gameState->model.mesh.materialCount && m < 8; m++)
-        {
-            engine->frames[i].shaderData.baseColorFactor[m] = gameState->model.mesh.materials[m].baseColorFactor;
-        }
+    gameState->room = load_gltf_model(gameState->arena, "../data/rooms/room05.glb");
+
+    if (gameState->room.mesh.vertCount == 0) {
+        SDL_Log("Failed to load glTF room!");
+        return false;
     }
 
     // Upload to Vulkan GPU buffers
     if (!upload_model_to_gpu(engine, &gameState->model)) {
-        SDL_Log("Failed to upload glTF mesh to GPU");
+        SDL_Log("Failed to upload glTF model mesh to GPU");
         return false;
     }
 
     SDL_Log("Successfully loaded and uploaded glTF model with %d vertices, %d indices", 
             gameState->model.mesh.vertCount, gameState->model.mesh.triCount);
+
+    // Upload to Vulkan GPU buffers
+    if (!upload_model_to_gpu(engine, &gameState->room)) {
+        SDL_Log("Failed to upload glTF room mesh to GPU");
+        return false;
+    }
+
+    SDL_Log("Successfully loaded and uploaded glTF room with %d vertices, %d indices", 
+            gameState->room.mesh.vertCount, gameState->room.mesh.triCount);
 
     for (uint32_t i = 0; i < FRAME_OVERLAP; i++) {
         VkBufferCreateInfo uBufferCI{
@@ -1246,7 +1411,6 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
 
     VK_CHECK(vkCreateDescriptorPool(engine->device, &descPoolCI, nullptr, &engine->descriptorPool));
 
-
     // === Allocate Descriptor Set ===
     VkDescriptorSetAllocateInfo texDescSetAlloc{
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -1345,12 +1509,16 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     vkUpdateDescriptorSets(engine->device, 2, writes.data(), 0, nullptr);
 
     // Loading shaders
-    Slang::ComPtr<slang::IGlobalSession> globalSession;
-    slang::createGlobalSession(globalSession.writeRef());
+    //Slang::ComPtr<slang::IGlobalSession> globalSession;
+    engine->slangGlobalSession = {};
+    slang::createGlobalSession(engine->slangGlobalSession.writeRef());
+    if (!engine->slangGlobalSession) {
+    SDL_Log("Failed to create slangGlobalSession");
+}
 
     auto targets = std::to_array<slang::TargetDesc>({{
         .format = SLANG_SPIRV,
-        .profile = globalSession->findProfile("spirv_1_6")
+        .profile = engine->slangGlobalSession->findProfile("spirv_1_6")
     }});
 
     auto options = std::to_array<slang::CompilerOptionEntry>({{
@@ -1367,7 +1535,7 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     };
 
     Slang::ComPtr<slang::ISession> slangSession;
-    globalSession->createSession(sessionDesc, slangSession.writeRef());
+    engine->slangGlobalSession->createSession(sessionDesc, slangSession.writeRef());
 
     Slang::ComPtr<ISlangBlob> diagnosticsBlob;
 
@@ -1436,6 +1604,7 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
         .pPushConstantRanges = &pushConstantRange 
     };
     VK_CHECK(vkCreatePipelineLayout(engine->device, &pipelineLayoutCI, nullptr, &engine->pipelineLayout));
+
 
     VkVertexInputBindingDescription vertexBinding{
         .binding = 0,
@@ -1576,6 +1745,52 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     };
     VK_CHECK(vkCreateGraphicsPipelines(engine->device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &engine->graphicsPipeline));
 
+    SDL_Log("Main 3D pipeline created successfully");
+
+    if(!LoadFontAtlas(engine, &engine->fontAtlas))
+        SDL_Log("ERROR: LoadFontAtlas failed completely!");
+
+    SDL_Log("=== After LoadFontAtlas ===");
+    SDL_Log("atlas->image      = %p", (void*)engine->fontAtlas.image);
+    SDL_Log("atlas->imageView  = %p", (void*)engine->fontAtlas.imageView);
+    SDL_Log("atlas->sampler    = %p", (void*)engine->fontAtlas.sampler);
+    SDL_Log("atlasWidth=%d, atlasHeight=%d", engine->fontAtlas.atlasWidth, engine->fontAtlas.atlasHeight);
+
+    // At this point these MUST be valid:
+    SDL_Log("Font atlas ready - ImageView: %p, Sampler: %p", 
+            (void*)engine->fontAtlas.imageView, (void*)engine->fontAtlas.sampler);
+
+    // Create text-specific descriptor layout
+    if (!create_text_descriptor_layout(engine)) {
+        SDL_Log("Failed to create text descriptor layout");
+        return false;
+    }
+
+    if(!update_text_descriptors(engine))
+    {
+        SDL_Log("Failed to create text descriptor layout");
+        return false;
+    }
+
+    transition_font_atlas(engine);
+
+    // Then create the text pipeline
+    if (!create_text_pipeline(engine)) {
+        SDL_Log("Failed to create text pipeline");
+    }
+    // === TEXT PIPELINE DEBUG ===
+SDL_Log("=== TEXT PIPELINE DEBUG ===");
+SDL_Log("textPipeline          = %p", (void*)engine->textPipeline);
+SDL_Log("textPipelineLayout    = %p", (void*)engine->textPipelineLayout);
+SDL_Log("textDescriptorSet     = %p", (void*)engine->textDescriptorSet);
+SDL_Log("textDescriptorSetLayout = %p", (void*)engine->textDescriptorSetLayout);
+SDL_Log("textShaderModule      = %p", (void*)engine->textShaderModule);
+SDL_Log("fontAtlas.imageView   = %p", (void*)engine->fontAtlas.imageView);
+SDL_Log("fontAtlas.sampler     = %p", (void*)engine->fontAtlas.sampler);
+SDL_Log("fontAtlas.atlasWidth  = %d", engine->fontAtlas.atlasWidth);
+SDL_Log("swapchainImageFormat  = %d", (int)engine->swapchainImageFormat);
+SDL_Log("depthFormat           = %d", (int)engine->depthFormat);
+
     return true;
 }
 
@@ -1678,4 +1893,135 @@ AllocatedImage create_image(VulkanEngine* engine, VkExtent3D size,
 void destroy_image(VulkanEngine *engine, const AllocatedImage &img) {
   vkDestroyImageView(engine->device, img.imageView, nullptr);
   vmaDestroyImage(engine->allocator, img.image, img.allocation);
+}
+
+void DrawText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
+              const char* text, float screenX, float screenY,
+              float red, float green, float blue)
+{
+    if (!text || !atlas || atlas->atlasWidth == 0 || !engine->textPipeline) {
+        SDL_Log("DrawText: invalid input");
+        return;
+    }
+
+    int len = 0;
+    while (text[len]) ++len;
+    if (len == 0) return;
+
+    float cursorX = std::floor(screenX);
+    float cursorY = std::floor(screenY);
+
+    TextVertex* verts = (TextVertex*)alloca(len * 6 * sizeof(TextVertex));
+    int vertCount = 0;
+
+    for (int i = 0; i < len; ++i)
+    {
+        unsigned char c = (unsigned char)text[i];
+        if (c < 32 || c > 127) {
+            cursorX += 12.0f;
+            continue;
+        }
+
+        Glyph* g = &atlas->glyphs[c];
+
+        float charX = cursorX + g->xoff;
+        float charY = cursorY - g->yoff;
+
+        float x0 = (charX / engine->windowExtent.width) * 2.0f - 1.0f;
+        float y0 = 1.0f - (charY / engine->windowExtent.height) * 2.0f;
+        float x1 = ((charX + g->width) / engine->windowExtent.width) * 2.0f - 1.0f;
+        float y1 = 1.0f - ((charY + g->height) / engine->windowExtent.height) * 2.0f;
+
+        // Same V-flip logic that made the full atlas right-side up
+        float u0 = g->u0;
+        float v0 = g->v1;   // flip V
+        float u1 = g->u1;
+        float v1 = g->v0;   // flip V
+
+        const float inset = 4.0f / (float)atlas->atlasWidth;
+
+        u0 += inset;
+        v0 -= inset;   // because we flipped
+        u1 -= inset;
+        v1 += inset;
+
+        verts[vertCount++] = {{x0, y0}, {u0, v0}};
+        verts[vertCount++] = {{x1, y0}, {u1, v0}};
+        verts[vertCount++] = {{x0, y1}, {u0, v1}};
+
+        verts[vertCount++] = {{x1, y0}, {u1, v0}};
+        verts[vertCount++] = {{x1, y1}, {u1, v1}};
+        verts[vertCount++] = {{x0, y1}, {u0, v1}};
+
+        cursorX += g->width;
+    }
+
+    if (vertCount == 0) return;
+
+    struct PushColor push = { red, green, blue, 1.0f };
+
+    vkCmdPushConstants(cmd, engine->textPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0, sizeof(push), &push);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipelineLayout,
+                            0, 1, &engine->textDescriptorSet, 0, nullptr);
+
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAlloc;
+    void* mapped;
+
+    VkBufferCreateInfo stagingCI = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = vertCount * sizeof(TextVertex),
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    };
+
+    VmaAllocationCreateInfo stagingAllocCI = {
+        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .usage = VMA_MEMORY_USAGE_AUTO
+    };
+
+    VK_CHECK(vmaCreateBuffer(engine->allocator, &stagingCI, &stagingAllocCI,
+                             &stagingBuffer, &stagingAlloc, nullptr));
+
+    vmaMapMemory(engine->allocator, stagingAlloc, &mapped);
+    memcpy(mapped, verts, vertCount * sizeof(TextVertex));
+    vmaUnmapMemory(engine->allocator, stagingAlloc);
+
+    vkCmdDraw(cmd, vertCount, 1, 0, 0);
+
+    vmaDestroyBuffer(engine->allocator, stagingBuffer, stagingAlloc);
+
+    SDL_Log("Drew '%s' with %d vertices", text, vertCount);
+}
+
+bool init_opengl(VulkanEngine *engine)
+{
+    // Tell SDL we want OpenGL context
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+
+    // Create the OpenGL context from your existing SDL window
+    engine->glContext = SDL_GL_CreateContext(engine->window);   // 'window' is your SDL_Window*
+    if (!engine->glContext) {
+        SDL_Log("Failed to create OpenGL context: %s", SDL_GetError());
+        return false;
+    }
+
+    // Initialize GLAD
+    if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
+        SDL_Log("Failed to initialize GLAD");
+        SDL_GL_DestroyContext(engine->glContext);
+        engine->glContext = nullptr;
+        return false;
+    }
+
+    SDL_Log("OpenGL initialized successfully!");
+    SDL_Log("OpenGL Version: %s", glGetString(GL_VERSION));
+    SDL_Log("GLSL Version: %s", glGetString(GL_SHADING_LANGUAGE_VERSION));
+
+    engine->hasOpenGL = true;
+    return true;
 }

@@ -3,7 +3,9 @@
 #include "vk_descriptors.h"
 #include "vk_loader.h"
 #include "camera.h"
+#include "vk_text.h"
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan_core.h>
 #include "tiny_obj_loader.h"
 
 #include "slang/slang.h"
@@ -59,6 +61,7 @@ struct GPUSceneData
     HMM_Vec4 sunlightDirection;  // w for sun power
     HMM_Vec4 sunlightColor;
 };
+
 
 struct ShaderData
 {
@@ -190,6 +193,9 @@ struct VulkanEngine
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkDescriptorSet descriptorSetTex = VK_NULL_HANDLE;
 
+    VkDescriptorSetLayout textDescriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSet       textDescriptorSet = VK_NULL_HANDLE;
+
     // model
     HMM_Vec3 camPos{0.0f, 0.0f, -6.0f};
     HMM_Vec3 objectRotations[3]{};
@@ -198,6 +204,7 @@ struct VulkanEngine
     // slang
     Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
     VkShaderModule shaderModule{};
+    VkShaderModule textShaderModule{};
 
     // swapchain
     VkImage swapchainImages[MAX_SWAPCHAIN_IMAGES];
@@ -214,6 +221,18 @@ struct VulkanEngine
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
 
+    // text rendering with Vulkan
+    VkPipeline      textPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout textPipelineLayout = VK_NULL_HANDLE;
+
+    // Font atlas
+    FontAtlas       fontAtlas;
+
+    // text rendering with OpenGL
+    SDL_GLContext glContext = nullptr;
+    bool hasOpenGL = false;
+    GameFont font;
+    int pixelHeight = 24;
 };
 
 // singleton for pointer retrieval
@@ -223,6 +242,7 @@ struct GameState;
 // init functions
 void init_vulkan(VulkanEngine *engine);
 void init_swapchain(VulkanEngine *engine);
+bool init_opengl(VulkanEngine *engine);
 
 void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height);
 void destroy_swapchain(VulkanEngine *engine);
@@ -236,6 +256,8 @@ void howtoCleanupVulkanEngine(VulkanEngine *engine);
 void drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState);
 void runVulkanEngine(VulkanEngine *engine, GameState *gameState);
 FrameData *getCurrentFrame(VulkanEngine *engine);
+void DrawText(VulkanEngine *engine, VkCommandBuffer cmd, FontAtlas *atlas,
+const char *text, float x, float y, float red = 1.0f, float green = 0.0f, float blue = 0.0f);
 
 // Textures
 AllocatedImage create_image(VulkanEngine *engine, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);

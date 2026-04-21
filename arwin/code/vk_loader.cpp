@@ -1,12 +1,61 @@
-#include "stb_image.h"
 #include "vk_loader.h"
 
 #include "HandmadeMath.h"
+#include <SDL3/SDL_pixels.h>
+#include <vulkan/vulkan_core.h>
 
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "stb_truetype.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
 extern Arena gArena;
+
+// Allocate and begin a one-time command buffer
+static VkCommandBuffer begin_single_time_commands(VulkanEngine* engine)
+{
+    VkCommandBufferAllocateInfo allocInfo = {
+        .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool        = engine->commandPool,          // Use your main command pool
+        .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+
+    VkCommandBuffer commandBuffer;
+    VK_CHECK(vkAllocateCommandBuffers(engine->device, &allocInfo, &commandBuffer));
+
+    VkCommandBufferBeginInfo beginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT   // Important for one-time use
+    };
+
+    VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
+
+    return commandBuffer;
+}
+
+// End, submit, and wait for the one-time command buffer to finish
+static void end_single_time_commands(VulkanEngine* engine, VkCommandBuffer commandBuffer)
+{
+    VK_CHECK(vkEndCommandBuffer(commandBuffer));
+
+    VkSubmitInfo submitInfo = {
+        .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers    = &commandBuffer
+    };
+
+    // Submit to graphics queue and wait for it to finish
+    VK_CHECK(vkQueueSubmit(engine->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueWaitIdle(engine->graphicsQueue));   // Wait for completion (simple but safe for init)
+
+    // Clean up
+    vkFreeCommandBuffers(engine->device, engine->commandPool, 1, &commandBuffer);
+}
 
 int find_joint_index(cgltf_data *data, cgltf_node *node)
 {
@@ -16,108 +65,6 @@ int find_joint_index(cgltf_data *data, cgltf_node *node)
         if(skin->joints[i] == node) return i;
     return -1;
 }
-
-/*
-void extract_mesh(cgltf_data *data, Mesh *mesh)
-{
-    // first pass: count total verts and tris across all primitives
-    int totalVerts = 0;
-    int totalTris  = 0;
-    for(int p = 0; p < (int)data->meshes[0].primitives_count; p++)
-    {
-        cgltf_primitive *prim = &data->meshes[0].primitives[p];
-        totalVerts += (int)prim->attributes[0].data->count;
-        totalTris  += (int)prim->indices->count / 3;
-    }
-    
-    mesh->vertCount = totalVerts;
-    mesh->triCount  = totalTris;
-    mesh->verts = (Vertex*)arenaAlloc(&gArena, (totalVerts * sizeof(Vertex)));
-    mesh->tris  = (Tri*)arenaAlloc(&gArena, (totalTris * sizeof(Tri)));
-    memset(mesh->verts, 0, totalVerts * sizeof(Vertex));
-    
-    int vertOffset = 0;
-    int triOffset  = 0;
-    
-    // second pass: extract each primitive
-    for(int p = 0; p < (int)data->meshes[0].primitives_count; p++)
-    {
-        cgltf_primitive *prim = &data->meshes[0].primitives[p];
-        
-        cgltf_accessor *posAcc    = NULL;
-        cgltf_accessor *normAcc   = NULL;
-        cgltf_accessor *uvAcc     = NULL;
-        cgltf_accessor *jointAcc  = NULL;
-        cgltf_accessor *weightAcc = NULL;
-        
-        for(int i = 0; i < (int)prim->attributes_count; i++)
-        {
-            cgltf_attribute *attr = &prim->attributes[i];
-            switch(attr->type)
-            {
-                case cgltf_attribute_type_position: posAcc    = attr->data; break;
-                case cgltf_attribute_type_normal:   normAcc   = attr->data; break;
-                case cgltf_attribute_type_texcoord: uvAcc     = attr->data; break;
-                case cgltf_attribute_type_joints:   jointAcc  = attr->data; break;
-                case cgltf_attribute_type_weights:  weightAcc = attr->data; break;
-                default: break;
-            }
-        }
-        
-        int primVerts = (int)posAcc->count;
-        
-        for(int i = 0; i < primVerts; i++)
-        {
-            Vertex *v = &mesh->verts[vertOffset + i];
-            if(posAcc)    read_float_n(posAcc,    i, &v->position.X,      3);
-            if(normAcc)   read_float_n(normAcc,   i, &v->normal.X,   3);
-            if(uvAcc)     read_float_n(uvAcc,     i, &v->texcoord.U,       2);
-            if(weightAcc) read_float_n(weightAcc, i, &v->weights[0], 4);
-            if(jointAcc)
-            {
-                unsigned int j[4] = {};
-                cgltf_accessor_read_uint(jointAcc, i, j, 4);
-                v->joints[0]=j[0]; v->joints[1]=j[1];
-                v->joints[2]=j[2]; v->joints[3]=j[3];
-            }
-        }
-        
-        int primTris = (int)prim->indices->count / 3;
-        for(int i = 0; i < primTris; i++)
-        {
-            unsigned int a, b, c;
-            read_uint(prim->indices, i*3+0, &a);
-            read_uint(prim->indices, i*3+1, &b);
-            read_uint(prim->indices, i*3+2, &c);
-            // offset indices by vertOffset so they point to the right verts
-            mesh->tris[triOffset + i] = {{(int)a + vertOffset,
-                    (int)b + vertOffset,
-                    (int)c + vertOffset}};
-        }
-        unsigned int color = 0xffffffff;
-        if(prim->material)
-        {
-            cgltf_pbr_metallic_roughness *pbr = &prim->material->pbr_metallic_roughness;
-            int r = (int)(pbr->base_color_factor[0] * 255);
-            int g = (int)(pbr->base_color_factor[1] * 255);
-            int b = (int)(pbr->base_color_factor[2] * 255);
-            color = (b << 16) | (g << 8) | r;
-        }
-        
-        SDL_Log("primitive %d: r=%d g=%d b=%d", p,
-                (color >> 16) & 0xff,
-                (color >>  8) & 0xff,
-                (color >>  0) & 0xff);
-        
-        mesh->primitives[p] = { vertOffset, triOffset, primTris, color };
-        mesh->primitiveCount++;
-        
-        // Update 
-        vertOffset += primVerts;
-        triOffset  += primTris;
-    }
-}
-*/
 
 void extract_skeleton(cgltf_data *data, Skeleton *skel)
 {
@@ -458,9 +405,8 @@ bool upload_model_to_gpu(VulkanEngine* engine, Model* model)
 
     // Calculate sizes
     VkDeviceSize vertexBufferSize = model->mesh.vertCount * sizeof(Vertex);
-    VkDeviceSize indexBufferSize  = model->mesh.triCount * 3 * sizeof(uint32_t);  // using uint32 for safety
+    VkDeviceSize indexBufferSize  = model->mesh.triCount * 3 * sizeof(uint32_t);
 
-    // Create combined buffer (vertex + index) - matching your current style
     VkDeviceSize totalSize = vertexBufferSize + indexBufferSize;
 
     VkBufferCreateInfo bufferCI = {
@@ -478,177 +424,210 @@ bool upload_model_to_gpu(VulkanEngine* engine, Model* model)
     };
 
     VmaAllocationInfo allocInfo = {};
+
+    // Create buffer FOR THIS MODEL (not global engine->vBuffer)
     VK_CHECK(vmaCreateBuffer(engine->allocator, &bufferCI, &allocCI,
-                             &engine->vBuffer, &engine->vBufferAllocation, &allocInfo));
+                             &model->vertexBuffer, 
+                             &model->vertexBufferAllocation, 
+                             &allocInfo));
 
     // Upload data
     void* mapped = allocInfo.pMappedData;
 
-    // Copy vertices first
     memcpy(mapped, model->mesh.verts, vertexBufferSize);
-
-    // Copy indices right after vertices
     memcpy((char*)mapped + vertexBufferSize, model->mesh.tris, indexBufferSize);
 
-    // Save offsets and counts
-    engine->vertexBufferSize = vertexBufferSize;
-    engine->indexBufferOffset = vertexBufferSize;
-    engine->indexCount = model->mesh.triCount * 3;   // total number of indices
+    // Save offsets and counts inside the model
+    model->vertexBufferSize = vertexBufferSize;
+    model->indexBufferOffset = vertexBufferSize;
+    model->indexCount = model->mesh.triCount * 3;
 
-    SDL_Log("Uploaded glTF mesh: %d vertices, %d indices to GPU", 
+    SDL_Log("Uploaded model: %d vertices, %d indices to GPU", 
             model->mesh.vertCount, model->indexCount);
 
     return true;
 }
 
-/*
-bool
-load_model(Model *m, const char *path)
+bool LoadFontAtlas(VulkanEngine* engine, FontAtlas* atlas)
 {
-    cgltf_options options = {};
-    cgltf_data   *data    = NULL;
-    
-    if(cgltf_parse_file(&options, path, &data) != cgltf_result_success)
-    {
-        SDL_Log("cgltf_parse_file failed: %s", path);
-        return false;
-    }
-    if(cgltf_load_buffers(&options, data, path) != cgltf_result_success)
-    {
-        SDL_Log("cgltf_load_buffers failed");
-        cgltf_free(data);
-        return false;
-    }
-    
-    extract_mesh(data, &m->mesh);
-    extract_skeleton(data, &m->skeleton);
-    extract_animations(data, m);
-    
-    SDL_Log("mesh count: %d", (int)data->meshes_count);
-    for(int i = 0; i < (int)data->meshes_count; i++)
-        SDL_Log("mesh %d: %d primitives", i, (int)data->meshes[i].primitives_count);
-    
-    cgltf_free(data);
-    return true;
-}
+    if (!atlas) return false;
 
-bool
-load_room(Model *m, const char *path)
-{
-    cgltf_options options = {};
-    cgltf_data   *data    = NULL;
-    
-    if(cgltf_parse_file(&options, path, &data) != cgltf_result_success)
-    {
-        SDL_Log("load_room: parse failed: %s", path);
+    // Load font
+    size_t fileSize = 0;
+    unsigned char* fontData = (unsigned char*)SDL_LoadFile("../fonts/liberation-mono.ttf", &fileSize);
+    if (!fontData) {
+        SDL_Log("Failed to load font file");
         return false;
     }
-    if(cgltf_load_buffers(&options, data, path) != cgltf_result_success)
-    {
-        SDL_Log("load_room: load buffers failed");
-        cgltf_free(data);
+
+    stbtt_fontinfo font;
+    if (!stbtt_InitFont(&font, fontData, 0)) {
+        SDL_Log("stbtt_InitFont failed");
+        SDL_free(fontData);
         return false;
     }
-    
-    // count totals across ALL meshes
-    int totalVerts = 0;
-    int totalTris  = 0;
-    for(int mi = 0; mi < (int)data->meshes_count; mi++)
-    {
-        cgltf_mesh *mesh = &data->meshes[mi];
-        for(int p = 0; p < (int)mesh->primitives_count; p++)
-        {
-            cgltf_primitive *prim = &mesh->primitives[p];
-            if(!prim->indices) continue;
-            totalVerts += (int)prim->attributes[0].data->count;
-            totalTris  += (int)prim->indices->count / 3;
-        }
+
+    const int atlasSize = 2048;
+    const int padding = 8;
+
+    stbtt_pack_context packContext;
+    stbtt_packedchar packedChars[96];
+
+    unsigned char* atlasBitmap = (unsigned char*)malloc(atlasSize * atlasSize);
+    if (!atlasBitmap) {
+        SDL_free(fontData);
+        return false;
     }
-    
-    Mesh *out = &m->mesh;
-    out->vertCount      = totalVerts;
-    out->triCount       = totalTris;
-    out->primitiveCount = 0;
-    out->verts = (Vertex*)arenaAlloc(&gArena, totalVerts * sizeof(Vertex));
-    out->tris  = (Tri*)arenaAlloc(&gArena, totalTris  * sizeof(Tri));
-    memset(out->verts, 0, totalVerts * sizeof(Vertex));
-    
-    int vertOffset = 0;
-    int triOffset  = 0;
-    
-    for(int mi = 0; mi < (int)data->meshes_count; mi++)
-    {
-        cgltf_mesh *mesh = &data->meshes[mi];
-        for(int p = 0; p < (int)mesh->primitives_count; p++)
-        {
-            cgltf_primitive *prim = &mesh->primitives[p];
-            if(!prim->indices) continue;
-            
-            cgltf_accessor *posAcc  = NULL;
-            cgltf_accessor *normAcc = NULL;
-            cgltf_accessor *uvAcc   = NULL;
-            
-            for(int i = 0; i < (int)prim->attributes_count; i++)
-            {
-                cgltf_attribute *attr = &prim->attributes[i];
-                switch(attr->type)
-                {
-                    case cgltf_attribute_type_position: posAcc  = attr->data; break;
-                    case cgltf_attribute_type_normal:   normAcc = attr->data; break;
-                    case cgltf_attribute_type_texcoord: uvAcc   = attr->data; break;
-                    default: break;
-                }
-            }
-            
-            if(!posAcc) continue;
-            
-            int primVerts = (int)posAcc->count;
-            for(int i = 0; i < primVerts; i++)
-            {
-                Vertex *v = &out->verts[vertOffset + i];
-                if(posAcc)  read_float_n(posAcc,  i, &v->position.X,    3);
-                if(normAcc) read_float_n(normAcc, i, &v->normal.X, 3);
-                if(uvAcc)   read_float_n(uvAcc,   i, &v->texcoord.U,     2);
-                // no joints/weights for static room
-            }
-            
-            int primTris = (int)prim->indices->count / 3;
-            for(int i = 0; i < primTris; i++)
-            {
-                unsigned int a, b, c;
-                read_uint(prim->indices, i*3+0, &a);
-                read_uint(prim->indices, i*3+1, &b);
-                read_uint(prim->indices, i*3+2, &c);
-                out->tris[triOffset + i] = {{
-                        (int)a + vertOffset,
-                        (int)b + vertOffset,
-                        (int)c + vertOffset
-                    }};
-            }
-            
-            unsigned int color = 0xffffffff;
-            if(prim->material)
-            {
-                cgltf_pbr_metallic_roughness *pbr = &prim->material->pbr_metallic_roughness;
-                int r = (int)(pbr->base_color_factor[0] * 255);
-                int g = (int)(pbr->base_color_factor[1] * 255);
-                int b = (int)(pbr->base_color_factor[2] * 255);
-                color = (b << 16) | (g << 8) | r;
-            }
-            
-            if(out->primitiveCount < 16)
-                out->primitives[out->primitiveCount++] = { vertOffset, triOffset, primTris, color };
-            
-            vertOffset += primVerts;
-            triOffset  += primTris;
-        }
+
+    stbtt_PackBegin(&packContext, atlasBitmap, atlasSize, atlasSize, 0, padding, nullptr);
+    stbtt_PackSetOversampling(&packContext, 2, 2);
+    stbtt_PackFontRange(&packContext, fontData, 0, 24.0f, 32, 96, packedChars);
+    stbtt_PackEnd(&packContext);
+
+    // Debug PNG
+    stbi_write_png("font_atlas_debug.png", atlasSize, atlasSize, 1, atlasBitmap, atlasSize);
+    SDL_Log("Saved font_atlas_debug.png - open it and check for gaps between letters");
+
+    // Create R8 image
+    VkImageCreateInfo imageCI = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R8_UNORM,
+        .extent = {(uint32_t)atlasSize, (uint32_t)atlasSize, 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+
+    VmaAllocationCreateInfo allocCI = {.usage = VMA_MEMORY_USAGE_GPU_ONLY};
+    if (vmaCreateImage(engine->allocator, &imageCI, &allocCI, &atlas->image, &atlas->allocation, nullptr) != VK_SUCCESS) {
+        SDL_Log("vmaCreateImage failed for font atlas");
+        free(atlasBitmap);
+        SDL_free(fontData);
+        return false;
     }
-    
-    SDL_Log("load_room: %d verts, %d tris, %d primitives",
-            totalVerts, totalTris, out->primitiveCount);
-    //debug_model_bounds(out);
-    
-    cgltf_free(data);
+
+    // === FULL UPLOAD (this was missing) ===
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAlloc;
+    VmaAllocationInfo stagingInfo;
+
+    VkBufferCreateInfo stagingCI = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = (VkDeviceSize)atlasSize * atlasSize,
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    };
+
+    VmaAllocationCreateInfo stagingAllocCI = {
+        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .usage = VMA_MEMORY_USAGE_AUTO
+    };
+
+    vmaCreateBuffer(engine->allocator, &stagingCI, &stagingAllocCI, &stagingBuffer, &stagingAlloc, &stagingInfo);
+    memcpy(stagingInfo.pMappedData, atlasBitmap, atlasSize * atlasSize);
+
+    VkCommandBuffer cmd = begin_single_time_commands(engine);
+
+    // Barrier 1: UNDEFINED -> TRANSFER_DST_OPTIMAL
+    VkImageMemoryBarrier2 barrier1 = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+        .srcAccessMask = 0,
+        .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .image = atlas->image,
+        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1}
+    };
+
+    VkDependencyInfo dep1 = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &barrier1
+    };
+    vkCmdPipelineBarrier2(cmd, &dep1);
+
+    // Copy
+    VkBufferImageCopy region = {
+        .bufferOffset = 0,
+        .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .layerCount = 1},
+        .imageExtent = {(uint32_t)atlasSize, (uint32_t)atlasSize, 1}
+    };
+    vkCmdCopyBufferToImage(cmd, stagingBuffer, atlas->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    // Barrier 2: TRANSFER_DST -> SHADER_READ_ONLY_OPTIMAL
+    VkImageMemoryBarrier2 barrier2 = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .image = atlas->image,
+        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1}
+    };
+
+    VkDependencyInfo dep2 = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &barrier2
+    };
+    vkCmdPipelineBarrier2(cmd, &dep2);
+
+    end_single_time_commands(engine, cmd);
+
+    vmaDestroyBuffer(engine->allocator, stagingBuffer, stagingAlloc);
+
+    // Create ImageView
+    VkImageViewCreateInfo viewCI = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = atlas->image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R8_UNORM,
+        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1}
+    };
+    VK_CHECK(vkCreateImageView(engine->device, &viewCI, nullptr, &atlas->imageView));
+
+    // Create sampler
+    VkSamplerCreateInfo samplerCI = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_NEAREST,
+        .minFilter = VK_FILTER_NEAREST,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+    };
+    VK_CHECK(vkCreateSampler(engine->device, &samplerCI, nullptr, &atlas->sampler));
+
+    // Fill glyph data with inset
+    const float inset = 4.0f / (float)atlasSize;   // stronger inset
+
+    for (int i = 32; i < 128; ++i) {
+        stbtt_packedchar* pc = &packedChars[i - 32];
+        Glyph* g = &atlas->glyphs[i];
+
+        g->u0 = (pc->x0 + inset) / (float)atlasSize;
+        g->v0 = (pc->y0 + inset) / (float)atlasSize;
+        g->u1 = (pc->x1 - inset) / (float)atlasSize;
+        g->v1 = (pc->y1 - inset) / (float)atlasSize;
+
+        g->width = pc->x1 - pc->x0;
+        g->height = pc->y1 - pc->y0;
+        g->xoff = pc->xoff;
+        g->yoff = pc->yoff;
+    }
+
+    atlas->atlasWidth = atlasSize;
+    atlas->atlasHeight = atlasSize;
+
+    SDL_free(fontData);
+    free(atlasBitmap);
+
+    SDL_Log("Font atlas loaded successfully (%dx%d)", atlasSize, atlasSize);
     return true;
 }
-*/

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "vk_types.h"
+#include "vk_engine.h"
 
 namespace vkutil
 {
@@ -38,4 +39,9 @@ void disable_depthtest(PipelineBuilder *pipe);
 void enable_depthtest(PipelineBuilder *pipe, bool depthWriteEnable, VkCompareOp op);
 void enable_blending_additive(PipelineBuilder *pipe);
 void enable_blending_alphablend(PipelineBuilder *pipe);
-
+bool create_text_descriptor_layout(VulkanEngine *engine);
+bool create_text_pipeline(VulkanEngine *engine);
+bool update_text_descriptors(VulkanEngine* engine);
+void transition_font_atlas(VulkanEngine* engine);
+static VkCommandBuffer begin_single_time_commands(VulkanEngine* engine);
+static void end_single_time_commands(VulkanEngine* engine, VkCommandBuffer commandBuffer);
