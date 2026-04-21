@@ -8,7 +8,11 @@ struct Glyph
 {
     float u0, v0, u1, v1;   // UV coordinates in atlas
     float width, height;    // pixel size
-    float xoff, yoff;       // offset from cursor position
+    float xoff;             // offset from cursor position horizontally
+    float yoff;             // offset from baseline to top 
+    float yoff2;            // offset from baseline to bottom
+    float xoff2;
+    float advance;          // better than just width
 };
 
 struct GameFont {
@@ -29,6 +33,9 @@ struct FontAtlas
     int glyphHeight;
 
     Glyph glyphs[128];      // ASCII 32-127
+
+    float baseline;
+    float lineHeight;
 };
 
 struct TextVertex

@@ -1024,7 +1024,8 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
     vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
     VkBuffer  tempStagingBuffer = engine->stagingBuffer;
     VmaAllocation tempStagingAlloc = engine->stagingAlloc;
-    DrawText(engine, cmd, &engine->fontAtlas, "HELLO", 100.0f, 100.0f, 1.0f, 1.0f, 1.0f);
+    DrawText(engine, cmd, &engine->fontAtlas, "HELLO", 100.0f, 280.0f, 1.0f, 1.0f, 1.0f);
+    DrawText(engine, cmd, &engine->fontAtlas, "Hello world", 100.0f, 340.0f, 1.0f, 1.0f, 1.0f);
 
     //SDL_Log("Before DrawText - textPipeline = %p, textPipelineLayout = %p, textDescriptorSet = %p", 
     //    (void*)engine->textPipeline, (void*)engine->textPipelineLayout, (void*)engine->textDescriptorSet);
@@ -1922,39 +1923,46 @@ void DrawText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
     {
         unsigned char c = (unsigned char)text[i];
         if (c < 32 || c > 127) {
-            cursorX += 12.0f;
+            cursorX += 14.0f;
             continue;
         }
 
         Glyph* g = &atlas->glyphs[c];
 
-        float charX = cursorX + g->xoff;
-        float charY = cursorY - g->yoff;
+        // baseline positioning
+        float charX = cursorX + g->xoff; // horizontal offset is fine
+        float charY = cursorY - atlas->baseline * 0.7f + g->yoff;
+        //float charY = cursorY + g->yoff; // top of glpyh
 
-        float x0 = (charX / engine->windowExtent.width)  * 2.0f - 1.0f;
-        float y0 = 1.0f - (charY / engine->windowExtent.height) * 2.0f;
-        float x1 = ((charX + g->width)  / engine->windowExtent.width)  * 2.0f - 1.0f;
-        float y1 = 1.0f - ((charY + g->height) / engine->windowExtent.height) * 2.0f;
+        // quad corners in pixel space
+        float x0 = charX;
+        float y0 = charY;                    // top
+        float x1 = charX + (g->xoff2 - g->xoff);   // right  (more accurate than width)
+        float y1 = charY + (g->yoff2 - g->yoff);   // bottom (this is the key fix!)
 
-        // V-flip UVs (your current logic looks correct for many atlases)
-        float u0 = g->u0;
-        float v0 = g->v1;
-        float u1 = g->u1;
-        float v1 = g->v0;
+        // Convert to Vulkan NDC (-1..1, Y flipped)
+        float ndc_x0 = (x0 / engine->windowExtent.width)  * 2.0f - 1.0f;
+        float ndc_y0 = 1.0f - (y0 / engine->windowExtent.height) * 2.0f;   // top in NDC
+        float ndc_x1 = (x1 / engine->windowExtent.width)  * 2.0f - 1.0f;
+        float ndc_y1 = 1.0f - (y1 / engine->windowExtent.height) * 2.0f;   // bottom in NDC
 
-        const float inset = 4.0f / (float)atlas->atlasWidth;
-        u0 += inset;  v0 -= inset;
-        u1 -= inset;  v1 += inset;
+        // UVs (your existing flip + inset)
+        float u0 = g->u0, v0 = g->v1;
+        float u1 = g->u1, v1 = g->v0;
 
-        verts[vertCount++] = {{x0, y0}, {u0, v0}};
-        verts[vertCount++] = {{x1, y0}, {u1, v0}};
-        verts[vertCount++] = {{x0, y1}, {u0, v1}};
+        // small inset already baked in LoadFontAtlas
 
-        verts[vertCount++] = {{x1, y0}, {u1, v0}};
-        verts[vertCount++] = {{x1, y1}, {u1, v1}};
-        verts[vertCount++] = {{x0, y1}, {u0, v1}};
+        // Build vertices (counter-clockwise triangles)
+        verts[vertCount++] = {{ndc_x0, ndc_y0}, {u0, v0}};
+        verts[vertCount++] = {{ndc_x1, ndc_y0}, {u1, v0}};
+        verts[vertCount++] = {{ndc_x0, ndc_y1}, {u0, v1}};
 
-        cursorX += g->width;   // or better: g->advance if you have it
+        verts[vertCount++] = {{ndc_x1, ndc_y0}, {u1, v0}};
+        verts[vertCount++] = {{ndc_x1, ndc_y1}, {u1, v1}};
+        verts[vertCount++] = {{ndc_x0, ndc_y1}, {u0, v1}};
+
+        // Advance cursor
+        cursorX += g->width + 6.0f;   // or better: pc->xadvance if you store it
     }
 
     if (vertCount == 0) return;

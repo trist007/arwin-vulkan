@@ -468,7 +468,8 @@ bool LoadFontAtlas(VulkanEngine* engine, FontAtlas* atlas)
     }
 
     const int atlasSize = 2048;
-    const int padding = 8;
+    const int padding = 12;
+    const float fontPixelHeight = 48.0f;
 
     stbtt_pack_context packContext;
     stbtt_packedchar packedChars[96];
@@ -481,8 +482,23 @@ bool LoadFontAtlas(VulkanEngine* engine, FontAtlas* atlas)
 
     stbtt_PackBegin(&packContext, atlasBitmap, atlasSize, atlasSize, 0, padding, nullptr);
     stbtt_PackSetOversampling(&packContext, 2, 2);
-    stbtt_PackFontRange(&packContext, fontData, 0, 24.0f, 32, 96, packedChars);
+
+    // pack at higher resolution
+    stbtt_PackFontRange(&packContext, fontData, 0, fontPixelHeight, 32, 96, packedChars);
     stbtt_PackEnd(&packContext);
+
+    // Get font vertical metrics (this is the proper way)
+    int ascent, descent, lineGap;
+    stbtt_GetFontVMetrics(&font, &ascent, &descent, &lineGap);
+
+    // Scale the metrics to our packed font size
+    float scale = stbtt_ScaleForPixelHeight(&font, fontPixelHeight);  // fontPixelHeight is your 48.0f
+
+    atlas->baseline   = (float)ascent * scale;          // distance from baseline to top of tallest glyph
+    //atlas->lineHeight = (ascent - descent + lineGap) * scale;
+
+    SDL_Log("Font metrics - Ascent: %d, Descent: %d, Baseline (pixels): %.2f", 
+        ascent, descent, atlas->baseline);
 
     // Debug PNG
     stbi_write_png("font_atlas_debug.png", atlasSize, atlasSize, 1, atlasBitmap, atlasSize);
@@ -605,7 +621,7 @@ bool LoadFontAtlas(VulkanEngine* engine, FontAtlas* atlas)
     VK_CHECK(vkCreateSampler(engine->device, &samplerCI, nullptr, &atlas->sampler));
 
     // Fill glyph data with inset
-    const float inset = 4.0f / (float)atlasSize;   // stronger inset
+    const float inset = 2.0f / (float)atlasSize;   // stronger inset
 
     for (int i = 32; i < 128; ++i) {
         stbtt_packedchar* pc = &packedChars[i - 32];
@@ -618,8 +634,11 @@ bool LoadFontAtlas(VulkanEngine* engine, FontAtlas* atlas)
 
         g->width = pc->x1 - pc->x0;
         g->height = pc->y1 - pc->y0;
-        g->xoff = pc->xoff;
-        g->yoff = pc->yoff;
+
+        g->xoff  = pc->xoff;
+        g->yoff  = pc->yoff;
+        g->xoff2 = pc->xoff2;
+        g->yoff2 = pc->yoff2;
     }
 
     atlas->atlasWidth = atlasSize;
