@@ -3,8 +3,6 @@
 #define MAX_PHYSICAL_DEVICES 2
 #define MAX_PHYSICAL_DEVICE_EXTENSIONS 256
 
-#define ArraySize(a) (sizeof(a) / sizeof(a[0]))
-
 typedef uint32_t u32;
 
 struct DeviceInformation

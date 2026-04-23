@@ -13,8 +13,6 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
-extern Arena gArena;
-
 // Allocate and begin a one-time command buffer
 static VkCommandBuffer begin_single_time_commands(VulkanEngine* engine)
 {
@@ -66,13 +64,13 @@ int find_joint_index(cgltf_data *data, cgltf_node *node)
     return -1;
 }
 
-void extract_skeleton(cgltf_data *data, Skeleton *skel)
+void extract_skeleton(Arena *arena, cgltf_data *data, Skeleton *skel)
 {
     if(!data->skins_count) return;
     cgltf_skin *skin = &data->skins[0];
     
     skel->jointCount = (int)skin->joints_count;
-    skel->joints = (Joint*)arenaAlloc(&gArena, (skel->jointCount * sizeof(Joint)));
+    skel->joints = (Joint*)arenaAlloc(arena, (skel->jointCount * sizeof(Joint)));
     
     for(int i = 0; i < skel->jointCount; i++)
     {
@@ -139,7 +137,7 @@ int path_to_type(cgltf_animation_path_type path)
     }
 }
 
-void extract_materials(cgltf_data* data, Mesh* mesh)
+void extract_materials(Arena *arena, cgltf_data* data, Mesh* mesh)
 {
     if (data->materials_count == 0)
     {
@@ -172,10 +170,10 @@ void extract_materials(cgltf_data* data, Mesh* mesh)
     }
 }
 
-void extract_animations(cgltf_data *data, Model *m)
+void extract_animations(Arena *arena, cgltf_data *data, Model *m)
 {
     m->animCount  = (int)data->animations_count;
-    m->animations = (Animation*)arenaAlloc(&gArena, (m->animCount * sizeof(Animation)));
+    m->animations = (Animation*)arenaAlloc(arena, (m->animCount * sizeof(Animation)));
     
     for(int a = 0; a < m->animCount; a++)
     {
@@ -184,7 +182,7 @@ void extract_animations(cgltf_data *data, Model *m)
         
         strncpy(anim->name, src->name ? src->name : "unnamed", 63);
         anim->channelCount = (int)src->channels_count;
-        anim->channels     = (AnimChannel*)arenaAlloc(&gArena, (anim->channelCount * sizeof(AnimChannel)));
+        anim->channels     = (AnimChannel*)arenaAlloc(arena, (anim->channelCount * sizeof(AnimChannel)));
         anim->duration     = 0.0f;
         
         for(int c = 0; c < anim->channelCount; c++)
@@ -198,7 +196,7 @@ void extract_animations(cgltf_data *data, Model *m)
             
             int count        = (int)samp->input->count;
             ch->keyframeCount = count;
-            ch->keyframes    = (Keyframe*)arenaAlloc(&gArena, (count * sizeof(Keyframe)));
+            ch->keyframes    = (Keyframe*)arenaAlloc(arena, (count * sizeof(Keyframe)));
             
             for(int k = 0; k < count; k++)
             {
@@ -213,7 +211,8 @@ void extract_animations(cgltf_data *data, Model *m)
     }
 }
 
-Model load_gltf_model(Arena* arena, const char* path)
+Model
+load_gltf_model(Arena *arena, const char* path)
 {
     Model model = {0};
 
@@ -381,11 +380,11 @@ Model load_gltf_model(Arena* arena, const char* path)
     }
 
     // Extract materials for shader baseColorFactor
-    extract_materials(data, &model.mesh);
+    extract_materials(arena, data, &model.mesh);
 
     // Extract skeleton & animations
-    extract_skeleton(data, &model.skeleton);
-    extract_animations(data, &model);
+    extract_skeleton(arena, data, &model.skeleton);
+    extract_animations(arena, data, &model);
 
     cgltf_free(data);
 

@@ -1,6 +1,7 @@
 #include "vk_engine.h"
 #include "vk_images.h"
 #include "vk_initializers.h"
+#include <stdio.h>
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan_core.h>
@@ -326,10 +327,10 @@ void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height)
     }
 
     // Clamp to allowed range
-    swapchainExtent.width = std::clamp(swapchainExtent.width,
+    swapchainExtent.width = CLAMP(swapchainExtent.width,
                                         surfaceCapabilities.minImageExtent.width,
                                         surfaceCapabilities.maxImageExtent.width);
-    swapchainExtent.height = std::clamp(
+    swapchainExtent.height = CLAMP(
         swapchainExtent.height, surfaceCapabilities.minImageExtent.height,
         surfaceCapabilities.maxImageExtent.height);
 
@@ -370,26 +371,26 @@ void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height)
 
     engine->swapchainImageCount = swapchainImageCount;
 
-    // check depth format
-    std::vector<VkFormat> depthFormatList{
+    VkFormat depthFormatList[MAX_DEPTH_FORMATS] = {
         VK_FORMAT_D32_SFLOAT,
         VK_FORMAT_D32_SFLOAT_S8_UINT,
         VK_FORMAT_D24_UNORM_S8_UINT
-        };
+    };
 
-        engine->depthFormat = VK_FORMAT_UNDEFINED;
+    engine->depthFormat = VK_FORMAT_UNDEFINED;
 
-    for (VkFormat &format : depthFormatList) {
+    for (int32_t i = 0; i < MAX_DEPTH_FORMATS; i++) {
         VkFormatProperties2 props{
             .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2};
-        vkGetPhysicalDeviceFormatProperties2(engine->chosenGPU, format,
-                                            &props);
+        vkGetPhysicalDeviceFormatProperties2(engine->chosenGPU, depthFormatList[i], &props);
+
         if (props.formatProperties.optimalTilingFeatures &
             VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
         {
-        engine->depthFormat = format;
-        const char* name = (format == VK_FORMAT_D32_SFLOAT) ? "D32_SFLOAT" :
-        (format == VK_FORMAT_D24_UNORM_S8_UINT) ? "D24_UNORM_S8_UINT" : "D32_SFLOAT_S8_UINT";
+        engine->depthFormat = depthFormatList[i];
+        const char* name = (depthFormatList[i] == VK_FORMAT_D32_SFLOAT) ? "D32_SFLOAT" :
+        (depthFormatList[i] == VK_FORMAT_D24_UNORM_S8_UINT) ? "D24_UNORM_S8_UINT" : "D32_SFLOAT_S8_UINT";
+        
         SDL_Log("Selected depth format: %s", name);
         break;
         }
@@ -774,7 +775,8 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
 
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    std::array<VkImageMemoryBarrier2, 2> outputBarriers{
+        VkImageMemoryBarrier2 outputBarriers[2] = {
+
         VkImageMemoryBarrier2{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -797,13 +799,13 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
             .image = engine->depthImage.image,
             //.subresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, .levelCount = 1, .layerCount = 1 }
             .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .layerCount = 1 }
-        }
-            };
+        }};
     VkDependencyInfo barrierDependencyInfo{
         .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
         .imageMemoryBarrierCount = 2,
-        .pImageMemoryBarriers = outputBarriers.data()
+        .pImageMemoryBarriers = outputBarriers
     };
+
     vkCmdPipelineBarrier2(cmd, &barrierDependencyInfo);
 
     VkRenderingAttachmentInfo colorAttachmentInfo{
@@ -834,7 +836,6 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
 
     vkCmdBeginRendering(cmd, &renderingInfo);
 
-    /*
     // Set viewport and scissor
     VkViewport vp = { .width = (float)engine->windowExtent.width, .height = (float)engine->windowExtent.height, .minDepth = 0.0f, .maxDepth = 1.0f };
     vkCmdSetViewport(cmd, 0, 1, &vp);
@@ -872,7 +873,7 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
             vkCmdDrawIndexed(cmd, prim->triCount * 3, 1, prim->triOffset * 3, 0, 0);
         }
     }
-/
+
     // === 2. Draw the CHARACTER ===
     if (gameState->model.mesh.vertCount > 0)
     {
@@ -896,7 +897,6 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
             vkCmdDrawIndexed(cmd, prim->triCount * 3, 1, prim->triOffset * 3, 0, 0);
         }
     }
-        */
 
     // draw text
     
@@ -1017,8 +1017,6 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
     SDL_Log("Solid red quad submitted");
     */
 
-    SDL_Log("=== Now trying real DrawText ===");
-
     // Add this line:
     vkCmdSetDepthTestEnable(cmd, VK_FALSE);
     vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
@@ -1099,8 +1097,6 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     engine->attrib;
     engine->shapes;
     engine->materials;
-    std::string warn;
-    std::string err;
 
     bool result = true;
 
@@ -1213,19 +1209,26 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
 
     // there are 3 ktx files in assets
     engine->textureCount = 3;
-    VkDescriptorImageInfo textureDescriptors[engine->textureCount];
+    VkDescriptorImageInfo textureDescriptors[(engine->textureCount)];
+
+    char *filename = "../data/assets/suzanne";
 
     // Loading textures
     for (uint32_t i = 0; i < engine->textureCount; i++)
     {
         ktxTexture* ktxTexture{ nullptr };
-        std::string filename = "../data/assets/suzanne" + std::to_string(i) + ".ktx";
-        KTX_error_code ret = ktxTexture_CreateFromNamedFile(filename.c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTexture);
+
+        // Filename will decay into const char* when passed to function that expects const char*
+        char FileName[32] = {};
+
+        sprintf(FileName, "%s%d.ktx", filename, i);
+        SDL_Log("FileName = %s", FileName);
+        KTX_error_code ret = ktxTexture_CreateFromNamedFile(FileName, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTexture);
 
         if(ret != KTX_SUCCESS || ktxTexture == nullptr)
         {
             SDL_Log("current working directory: %s", SDL_GetCurrentDirectory());
-            SDL_Log("Error: failed to load texture %s (error: %d)", filename.c_str(), ret);
+            SDL_Log("Error: failed to load texture %s (error: %d)", filename, ret);
             abort();
         }
 
@@ -1312,18 +1315,33 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
 
         vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
 
-        std::vector<VkBufferImageCopy> copyRegions{};
-        for (auto j = 0; j < ktxTexture->numLevels; j++) {
+        VkBufferImageCopy *copyRegions = (VkBufferImageCopy*)arenaAlloc(engine->arena, ktxTexture->numLevels * sizeof(VkBufferImageCopy));   
+        for (uint32_t j = 0; j < ktxTexture->numLevels; j++)
+        {
             ktx_size_t mipOffset{0};
             KTX_error_code ret = ktxTexture_GetImageOffset(ktxTexture, j, 0, 0, &mipOffset);
-            copyRegions.push_back({
+
+            copyRegions[j] = (VkBufferImageCopy){
                 .bufferOffset = mipOffset,
-                .imageSubresource{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = (uint32_t)j, .layerCount = 1},
-                .imageExtent{.width = ktxTexture->baseWidth >> j, .height = ktxTexture->baseHeight >> j, .depth = 1 },
-            });
+                .imageSubresource = {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .mipLevel = j,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1
+                },
+                .imageExtent = {
+                    .width = ktxTexture->baseWidth >> j,
+                    .height = ktxTexture->baseHeight >> j,
+                    .depth = 1
+                }
+            };
         }
 
-        vkCmdCopyBufferToImage(cbOneTime, imgSrcBuffer, engine->textures[i].image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>(copyRegions.size()), copyRegions.data());
+        vkCmdCopyBufferToImage(cbOneTime, imgSrcBuffer, engine->textures[i].image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            (uint32_t)ARRAYSIZE(copyRegions),
+            copyRegions);
+
         VkImageMemoryBarrier2 barrierTexRead{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -1509,9 +1527,9 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
         .pBufferInfo = &shaderDataBufferInfo
     };
 
-    std::array<VkWriteDescriptorSet, 2> writes = { writeTex, writeShaderData };
+    const VkWriteDescriptorSet writes[2] = { writeTex, writeShaderData };
 
-    vkUpdateDescriptorSets(engine->device, 2, writes.data(), 0, nullptr);
+    vkUpdateDescriptorSets(engine->device, 2, writes, 0, nullptr);
 
     // Loading shaders
     //Slang::ComPtr<slang::IGlobalSession> globalSession;
@@ -1521,22 +1539,27 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     SDL_Log("Failed to create slangGlobalSession");
 }
 
-    auto targets = std::to_array<slang::TargetDesc>({{
+    slang::TargetDesc target = {
         .format = SLANG_SPIRV,
         .profile = engine->slangGlobalSession->findProfile("spirv_1_6")
-    }});
+    };
 
-    auto options = std::to_array<slang::CompilerOptionEntry>({{
-        slang::CompilerOptionName::EmitSpirvDirectly,
-        {slang::CompilerOptionValueKind::Int, 1}
-    }});
+    slang::CompilerOptionEntry option = {
+        .name = slang::CompilerOptionName::EmitSpirvDirectly,
+        .value = {
+        .kind          = slang::CompilerOptionValueKind::Int,
+        .intValue0     = 1,      // 1 = enable
+        .intValue1     = 0,
+        .stringValue0  = NULL,
+        .stringValue1  = NULL
+    }};
 
     slang::SessionDesc sessionDesc{
-        .targets = targets.data(),
-        .targetCount = SlangInt(targets.size()),
+        .targets = &target,
+        .targetCount = 1,
         .defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR,
-        .compilerOptionEntries = options.data(),
-        .compilerOptionEntryCount = uint32_t(options.size())
+        .compilerOptionEntries = &option,
+        .compilerOptionEntryCount = 1
     };
 
     Slang::ComPtr<slang::ISession> slangSession;
@@ -1617,57 +1640,65 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
     };
 
-    std::vector<VkVertexInputAttributeDescription> vertexAttributes{
-        // Location 0: Position
-        {
-            .location = 0,
-            .binding  = 0,
-            .format   = VK_FORMAT_R32G32B32_SFLOAT,
-            .offset   = offsetof(Vertex, position)
-        },
-        // Location 1: Normal
-        {
-            .location = 1,
-            .binding  = 0,
-            .format   = VK_FORMAT_R32G32B32_SFLOAT,
-            .offset   = offsetof(Vertex, normal)
-        },
-        // Location 2: Texcoord
-        {
-            .location = 2,
-            .binding  = 0,
-            .format   = VK_FORMAT_R32G32_SFLOAT,
-            .offset   = offsetof(Vertex, texcoord)
-        },
-        // Location 3: Color
-        {
-            .location = 3,
-            .binding  = 0,
-            .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
-            .offset   = offsetof(Vertex, color)
-        },
-        // Location 4: Joints (uint8_t[4])
-        {
-            .location = 4,
-            .binding  = 0,
-            .format   = VK_FORMAT_R8G8B8A8_UINT,
-            .offset   = offsetof(Vertex, joints)
-        },
-        // Location 5: Weights
-        {
-            .location = 5,
-            .binding  = 0,
-            .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
-            .offset   = offsetof(Vertex, weights)
-        }
+    uint32_t attributeCount = 6;
+
+    VkVertexInputAttributeDescription *vertexAttributes = (VkVertexInputAttributeDescription*)arenaAlloc(engine->arena, attributeCount
+        * sizeof(VkVertexInputAttributeDescription));
+
+    // Location 0: Position
+    vertexAttributes[0] = (VkVertexInputAttributeDescription){
+        .location = 0,
+        .binding  = 0,
+        .format   = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset   = offsetof(Vertex, position)
+    };
+
+    // Location 1: Normal
+    vertexAttributes[1] = (VkVertexInputAttributeDescription){
+        .location = 1,
+        .binding  = 0,
+        .format   = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset   = offsetof(Vertex, normal)
+    };
+
+    // Location 2: Texcoord
+    vertexAttributes[2] = (VkVertexInputAttributeDescription){
+        .location = 2,
+        .binding  = 0,
+        .format   = VK_FORMAT_R32G32_SFLOAT,
+        .offset   = offsetof(Vertex, texcoord)
+    };
+
+    // Location 3: Color
+    vertexAttributes[3] = (VkVertexInputAttributeDescription){
+        .location = 3,
+        .binding  = 0,
+        .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .offset   = offsetof(Vertex, color)
+    };
+
+    // Location 4: Joints (uint8_t[4])
+    vertexAttributes[4] = (VkVertexInputAttributeDescription){
+        .location = 4,
+        .binding  = 0,
+        .format   = VK_FORMAT_R8G8B8A8_UINT,
+        .offset   = offsetof(Vertex, joints)
+    };
+
+    // Location 5: Weights
+    vertexAttributes[5] = (VkVertexInputAttributeDescription){
+        .location = 5,
+        .binding  = 0,
+        .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .offset   = offsetof(Vertex, weights)
     };
 
     VkPipelineVertexInputStateCreateInfo vertexInputState{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .vertexBindingDescriptionCount = 1,
         .pVertexBindingDescriptions = &vertexBinding,
-        .vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexAttributes.size()),
-        .pVertexAttributeDescriptions = vertexAttributes.data(),
+        .vertexAttributeDescriptionCount = attributeCount,
+        .pVertexAttributeDescriptions = vertexAttributes,
     };
 
     VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{
@@ -1676,13 +1707,17 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     };
 
     // Entry points in the shaders
-    std::vector<VkPipelineShaderStageCreateInfo> shaderStages{
-        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .stage = VK_SHADER_STAGE_VERTEX_BIT,
-        .module = engine->shaderModule, .pName = "VSMain"},
-        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-        .module = engine->shaderModule, .pName = "PSMain" }
+    VkPipelineShaderStageCreateInfo shaderStages[2] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .module = engine->shaderModule, .pName = "VSMain"
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = engine->shaderModule, .pName = "PSMain"
+        }
     };
 
     // configure viewport state
@@ -1691,11 +1726,16 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
         .viewportCount = 1,
         .scissorCount = 1
     };
-    std::vector<VkDynamicState> dynamicStates{ VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-    VkPipelineDynamicStateCreateInfo dynamicState{
+    
+    VkDynamicState dynamicStates[2] = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR
+    };
+
+    VkPipelineDynamicStateCreateInfo dynamicState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        .dynamicStateCount = 2,
-        .pDynamicStates = dynamicStates.data()
+        .dynamicStateCount = ARRAYSIZE(dynamicStates),
+        .pDynamicStates = dynamicStates
     };
 
     VkPipelineDepthStencilStateCreateInfo depthStencilState{
@@ -1736,8 +1776,8 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     VkGraphicsPipelineCreateInfo pipelineCI{
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .pNext = &renderingCI,
-        .stageCount = 2,
-        .pStages = shaderStages.data(),
+        .stageCount = ARRAYSIZE(shaderStages),
+        .pStages = shaderStages,
         .pVertexInputState = &vertexInputState,
         .pInputAssemblyState = &inputAssemblyState,
         .pViewportState = &viewportState,
@@ -1862,10 +1902,20 @@ AllocatedImage create_image(VulkanEngine* engine, VkExtent3D size,
 
     VkImageCreateInfo img_info = vkinit::image_create_info(format, usage, size);
 
+
     if (mipmapped)
     {
-        img_info.mipLevels = static_cast<uint32_t>(std::floor(
-                                 std::log2(std::max(size.width, size.height)))) + 1;
+        uint32_t maxDimension = MAX(size.width, size.height);
+
+        if(maxDimension == 0)
+        {
+            img_info.mipLevels = 1;
+        }
+        else
+        {
+            double logValue = log2((double)maxDimension);
+            img_info.mipLevels = (uint32_t)floor(logValue) + 1;
+        }
     }
 
     VmaAllocationCreateInfo allocInfo = {};
@@ -1913,8 +1963,8 @@ void DrawText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
     while (text[len]) ++len;
     if (len == 0) return;
 
-    float cursorX = std::floor(screenX);
-    float cursorY = std::floor(screenY);
+    float cursorX = floor(screenX);
+    float cursorY = floor(screenY);
 
     TextVertex* verts = (TextVertex*)alloca(len * 6 * sizeof(TextVertex));
     int vertCount = 0;
@@ -2013,7 +2063,6 @@ void DrawText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
 
     //vmaDestroyBuffer(engine->allocator, stagingBuffer, stagingAlloc);
 
-    SDL_Log("Drew '%s' with %d vertices (%d glyphs)", text, vertCount, len);
 }
 
 bool init_opengl(VulkanEngine *engine)

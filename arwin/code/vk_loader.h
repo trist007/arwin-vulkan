@@ -4,7 +4,6 @@
 #include "vk_engine.h"
 #include "vk_loader.h"
 #include "vk_text.h"
-#include <cstdint>
 #include <vulkan/vulkan_core.h>
 
 #define MAX_DEBUG_LINES 16
@@ -235,9 +234,9 @@ bool upload_model_to_gpu(VulkanEngine* engine, Model* model);
 bool LoadFontAtlas(VulkanEngine *engine, FontAtlas *atlas);
 
 // You should implement these using HMM:
-void extract_materials(cgltf_data* data, Mesh* mesh);
-void extract_skeleton(cgltf_data* data, Skeleton* skeleton);
-void extract_animations(cgltf_data* data, Model* model);
+void extract_materials(Arena *arena, cgltf_data* data, Mesh* mesh);
+void extract_skeleton(Arena *arena, cgltf_data* data, Skeleton* skeleton);
+void extract_animations(Arena *arena, cgltf_data* data, Model* model);
 // void update_pose(Model* model, float time);   // example
 static VkCommandBuffer begin_single_time_commands(VulkanEngine* engine);
 static void end_single_time_commands(VulkanEngine* engine, VkCommandBuffer commandBuffer);

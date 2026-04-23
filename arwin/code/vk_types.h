@@ -1,12 +1,8 @@
 #pragma once
 
-#include <memory>
-#include <optional>
-#include <string>
 #include <vector>
 #include <iostream>
-#include <span>
-#include <array>
+#include <math.h>
 #include <functional>
 #include <deque>
 
@@ -22,7 +18,9 @@
 #include "glad/glad.h"
 
 
-#define ArraySize(arr) (uint32_t)(sizeof(arr) / sizeof(arr[0]))
+#define ARRAYSIZE(arr) (uint32_t)(sizeof(arr) / sizeof(arr[0]))
+#define CLAMP(v, low, high) ((v) < (low) ? (low) : (v) > (high) ? (high) : (v))
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
 
 
 /*

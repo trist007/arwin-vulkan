@@ -13,6 +13,7 @@
 
 #define MAX_SWAPCHAIN_IMAGES 8
 #define MAX_TEXTURES 3
+#define MAX_DEPTH_FORMATS 3
 
 // ! NOTE: trist007: deque is a double ended Queue that allows fast insertion and deletion at both
 // ! front and back ends, unlike a regular array which is only fast at the back
@@ -236,6 +237,8 @@ struct VulkanEngine
     VkBuffer  stagingBuffer = VK_NULL_HANDLE;
     VmaAllocation stagingAlloc = VK_NULL_HANDLE;
 
+    // memory arena
+    Arena *arena;
 };
 
 // singleton for pointer retrieval

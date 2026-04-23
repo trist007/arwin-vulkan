@@ -1,20 +1,25 @@
 #include "vk_engine.h"
 
-Arena gArena;
-
-
 int main(int argc,  char *argv[])
 {
-    static uint8_t permStorage[16 * 1024 * 1024];
-    gArena = {}; 
-    arenaInit(&gArena, permStorage, sizeof(permStorage));
+    // Game Storage
+    static uint8_t gameStorage[16 * 1024 * 1024];
+    Arena gameArena; 
+    arenaInit(&gameArena, gameStorage, sizeof(gameStorage));
+
+    // Engine Storage
+    static uint8_t engineStorage[16 * 1024 * 1024];
+    Arena engineArena;
+    arenaInit(&engineArena, engineStorage, sizeof(engineStorage));
 
     GameState gameState = {};
 
-    gameState.arena = &gArena;
+    gameState.arena = &gameArena;
 
     // initializes everything to 0
     VulkanEngine engine = {};
+
+    engine.arena = &engineArena;
 
     initVulkanEngine(&engine, &gameState);
 

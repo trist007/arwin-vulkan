@@ -16,7 +16,7 @@ LIBDIR := -L$(VULKAN_SDK_PATH)/lib \
 LDFLAGS := -lvulkan -lSDL3 -lm -lslang -lslang-compiler -lSDL3_ttf -lGL -lktx \
 	-Wl,-rpath,$(VULKAN_SDK_PATH)/lib \
 	-Wl,-rpath,/usr/local/lib64
-DEFINES :=-DSIMDJSON_DISABLE_PRETTY_PRINTING=1
+#DEFINES :=-DSIMDJSON_DISABLE_PRETTY_PRINTING=1
 
 # Directories
 BINDIR := ../bin
@@ -46,11 +46,11 @@ $(BINDIR):
 
 # compile .cpp to bin/%.o
 $(OBJDIR)/%.o: %.cpp | $(BUILDDIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(DEFINES) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # compile .c to bin/%.o
 $(GLAD_OBJ): glad.c | $(BUILDDIR)
-	$(CC) $(INCLUDES) $(DEFINES) -c $< -o $@
+	$(CC) $(INCLUDES) -c $< -o $@
 
 # Include auto-generated dependency files (incremental builds)
 -include $(OBJS:.o=.d)
