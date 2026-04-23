@@ -593,56 +593,66 @@ VertexInputDescription Vertex::get_vertex_description()
 {
     VertexInputDescription description = {};
 
-    // Binding 0
-    VkVertexInputBindingDescription binding = {};
-    binding.binding = 0;
-    binding.stride = sizeof(Vertex);
-    binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    description.bindings.push_back(binding);
+    // === Binding 0 ===
+    description.bindings[0] = {
+        .binding   = 0,
+        .stride    = sizeof(Vertex),
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+    };
+    description.bindingCount = 1;
 
-    VkVertexInputAttributeDescription attr = {};
+    // === Attributes ===
+    uint32_t loc = 0;
 
     // Location 0: Position
-    attr.location = 0;
-    attr.binding = 0;
-    attr.format = VK_FORMAT_R32G32B32_SFLOAT;
-    attr.offset = offsetof(Vertex, position);
-    description.attributes.push_back(attr);
+    description.attributes[loc++] = {
+        .location = 0,
+        .binding  = 0,
+        .format   = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset   = offsetof(Vertex, position)
+    };
 
     // Location 1: Normal
-    attr.location = 1;
-    attr.binding = 0;
-    attr.format = VK_FORMAT_R32G32B32_SFLOAT;
-    attr.offset = offsetof(Vertex, normal);
-    description.attributes.push_back(attr);
+    description.attributes[loc++] = {
+        .location = 1,
+        .binding  = 0,
+        .format   = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset   = offsetof(Vertex, normal)
+    };
 
     // Location 2: Texcoord
-    attr.location = 2;
-    attr.binding = 0;
-    attr.format = VK_FORMAT_R32G32_SFLOAT;
-    attr.offset = offsetof(Vertex, texcoord);
-    description.attributes.push_back(attr);
+    description.attributes[loc++] = {
+        .location = 2,
+        .binding  = 0,
+        .format   = VK_FORMAT_R32G32_SFLOAT,
+        .offset   = offsetof(Vertex, texcoord)
+    };
 
     // Location 3: Color
-    attr.location = 3;
-    attr.binding = 0;
-    attr.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    attr.offset = offsetof(Vertex, color);
-    description.attributes.push_back(attr);
+    description.attributes[loc++] = {
+        .location = 3,
+        .binding  = 0,
+        .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .offset   = offsetof(Vertex, color)
+    };
 
     // Location 4: Joints (uint8x4)
-    attr.location = 4;
-    attr.binding = 0;
-    attr.format = VK_FORMAT_R8G8B8A8_UINT;
-    attr.offset = offsetof(Vertex, joints);
-    description.attributes.push_back(attr);
+    description.attributes[loc++] = {
+        .location = 4,
+        .binding  = 0,
+        .format   = VK_FORMAT_R8G8B8A8_UINT,
+        .offset   = offsetof(Vertex, joints)
+    };
 
     // Location 5: Weights
-    attr.location = 5;
-    attr.binding = 0;
-    attr.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    attr.offset = offsetof(Vertex, weights);
-    description.attributes.push_back(attr);
+    description.attributes[loc++] = {
+        .location = 5,
+        .binding  = 0,
+        .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .offset   = offsetof(Vertex, weights)
+    };
+
+    description.attributeCount = loc;
 
     return description;
 }
@@ -677,18 +687,11 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
     currentFrame.shaderData.lightPos = HMM_V4(5.0f, 10.0f, 10.0f, 1.0f);
 
     // Copy skinning matrices
-    int jointCount = gameState->model.skeleton.jointCount;
+    int jointCount = gameState->model.pose.jointCount;
 
     for (int j = 0; j < jointCount && j < 64; ++j)
     {
-        if (j < gameState->model.pose.skinMatrices.size())   // safety check
-        {
-            currentFrame.shaderData.skinMatrices[j] = gameState->model.pose.skinMatrices[j];
-        }
-        else
-        {
-            currentFrame.shaderData.skinMatrices[j] = HMM_M4D(1.0f);  // identity matrix as fallback
-        }
+        currentFrame.shaderData.skinMatrices[j] = gameState->model.pose.skinMatrices[j];
     }
 
     // Fill remaining matrices with identity (good practice)
@@ -1092,12 +1095,6 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
 
 bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
 {
-
-
-    engine->attrib;
-    engine->shapes;
-    engine->materials;
-
     bool result = true;
 
 
@@ -2065,6 +2062,7 @@ void DrawText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
 
 }
 
+/*
 bool init_opengl(VulkanEngine *engine)
 {
     // Tell SDL we want OpenGL context
@@ -2094,3 +2092,4 @@ bool init_opengl(VulkanEngine *engine)
     engine->hasOpenGL = true;
     return true;
 }
+*/

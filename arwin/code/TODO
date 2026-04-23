@@ -1,11 +1,3 @@
-Issues with text rendering
-
-Quad positioning / NDC conversion is incorrect (causing the atlas parts to appear in wrong places and orientations).
-Alpha blending is not clean (striations on the triangle).
-
-fragment shader is outputting zero color/alpha, or the blend state is discarding everything.
-
-
 
 Adding more 3d models like monsters
 

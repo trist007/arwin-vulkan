@@ -31,12 +31,12 @@ TARGET := $(BINDIR)/arwin
 SRCS := $(filter-out text_renderer.cpp, $(wildcard *.cpp))
 OBJS := $(patsubst %.cpp,$(OBJDIR)/%.o, $(SRCS))
 
-GLAD_OBJ := $(BUILDDIR)/glad.o
+#GLAD_OBJ := $(BUILDDIR)/glad.o
 
 all: $(TARGET)
 
-$(TARGET): $(OBJS) $(GLAD_OBJ) | $(BINDIR) $(BUILDDIR)
-	$(CXX) $(CXXFLAGS) $(OBJS) $(GLAD_OBJ) $(LIBDIR) $(LDFLAGS) -o $@
+$(TARGET): $(OBJS) | $(BINDIR) $(BUILDDIR)
+	$(CXX) $(CXXFLAGS) $(OBJS) $(LIBDIR) $(LDFLAGS) -o $@
 
 $(BUILDDIR):
 	mkdir -p $@
@@ -49,8 +49,8 @@ $(OBJDIR)/%.o: %.cpp | $(BUILDDIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # compile .c to bin/%.o
-$(GLAD_OBJ): glad.c | $(BUILDDIR)
-	$(CC) $(INCLUDES) -c $< -o $@
+#$(GLAD_OBJ): glad.c | $(BUILDDIR)
+#	$(CC) $(INCLUDES) -c $< -o $@
 
 # Include auto-generated dependency files (incremental builds)
 -include $(OBJS:.o=.d)

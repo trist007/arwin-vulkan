@@ -120,7 +120,7 @@ struct Transform
 struct Pose
 {
     Transform *joints;         // local space transforms
-    std::vector<HMM_Mat4>  skinMatrices;   // final skinning matrices (one per joint)
+    HMM_Mat4  *skinMatrices;   // final skinning matrices (one per joint)
     int        jointCount;
 };
 

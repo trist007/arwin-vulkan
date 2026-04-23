@@ -2,3 +2,4 @@ build
 bin
 external
 *.dxil
+!arwin-vulkan.png

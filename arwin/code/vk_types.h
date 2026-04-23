@@ -1,7 +1,5 @@
 #pragma once
 
-#include <vector>
-#include <iostream>
 #include <math.h>
 #include <functional>
 #include <deque>
@@ -15,12 +13,14 @@
 
 #include "arena.h"
 #include "cgltf.h"
-#include "glad/glad.h"
 
 
 #define ARRAYSIZE(arr) (uint32_t)(sizeof(arr) / sizeof(arr[0]))
 #define CLAMP(v, low, high) ((v) < (low) ? (low) : (v) > (high) ? (high) : (v))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
+
+#define MAX_BINDINGS 4
+#define MAX_ATTRIBUTES 16
 
 
 /*
@@ -59,8 +59,11 @@ struct AllocatedBuffer
 
 struct VertexInputDescription
 {
-    std::vector<VkVertexInputBindingDescription> bindings;
-    std::vector<VkVertexInputAttributeDescription> attributes;
+    VkVertexInputBindingDescription bindings[MAX_BINDINGS];
+    VkVertexInputAttributeDescription attributes[MAX_ATTRIBUTES];;
+
+    uint32_t bindingCount = 0;
+    uint32_t attributeCount = 0;
 };
 
 struct PushColor {

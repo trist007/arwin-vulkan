@@ -178,9 +178,9 @@ struct VulkanEngine
     uint32_t frameIndex{};
 
     // tiny obj loader
-    tinyobj::attrib_t attrib;
-    std::vector<tinyobj::shape_t> shapes;
-    std::vector<tinyobj::material_t> materials;
+    //tinyobj::attrib_t attrib;
+    //std::vector<tinyobj::shape_t> shapes;
+    //std::vector<tinyobj::material_t> materials;
 
     // textures
     Texture textures[MAX_TEXTURES];
@@ -248,7 +248,7 @@ struct GameState;
 // init functions
 void init_vulkan(VulkanEngine *engine);
 void init_swapchain(VulkanEngine *engine);
-bool init_opengl(VulkanEngine *engine);
+//bool init_opengl(VulkanEngine *engine);
 
 void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height);
 void destroy_swapchain(VulkanEngine *engine);
