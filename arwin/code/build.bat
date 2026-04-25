@@ -59,8 +59,6 @@ cl %CommonCompilerFlags% ^
     ..\code\initVulkan.cpp ^
     ..\code\vk_engine.cpp ^
     ..\code\vk_initializers.cpp ^
-    ..\code\vk_images.cpp ^
-    ..\code\vk_descriptors.cpp ^
     ..\code\vk_pipelines.cpp ^
     ..\code\vk_loader.cpp ^
     ..\code\camera.cpp ^

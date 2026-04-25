@@ -231,8 +231,6 @@ struct VulkanEngine
     FontAtlas       fontAtlas;
 
     // text rendering with OpenGL
-    SDL_GLContext glContext = nullptr;
-    bool hasOpenGL = false;
     GameFont font;
     int pixelHeight = 24;
     VkBuffer  stagingBuffer = VK_NULL_HANDLE;
@@ -249,7 +247,18 @@ struct GameState;
 // init functions
 void init_vulkan(VulkanEngine *engine);
 void init_swapchain(VulkanEngine *engine);
-//bool init_opengl(VulkanEngine *engine);
+bool init_mezzanine(VulkanEngine *engine, GameState *gameState);
+
+// init_mezzanine
+bool load_and_upload_gltf_models(VulkanEngine *engine, GameState *gameState);
+bool create_per_frame_uniform_buffers(VulkanEngine *engine);
+bool create_main_3d_descriptor_layout_and_set(VulkanEngine *engine);
+bool create_main_graphics_pipeline(VulkanEngine *engine);
+bool setup_font_atlas_and_text_pipeline(VulkanEngine *engine);
+
+// main render loop
+void mainRenderLoop(VulkanEngine *engine, GameState *gameState);
+bool update_shader_data(FrameData currentFrame, GameState *gameState);
 
 void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height);
 void destroy_swapchain(VulkanEngine *engine);
@@ -260,7 +269,6 @@ void initVulkanEngine(VulkanEngine *engine, GameState *gameState);
 void cleanupVulkanEngine(VulkanEngine *engine);
 void howtoCleanupVulkanEngine(VulkanEngine *engine);
 
-void drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState);
 void runVulkanEngine(VulkanEngine *engine, GameState *gameState);
 FrameData *getCurrentFrame(VulkanEngine *engine);
 void RenderText(VulkanEngine *engine, VkCommandBuffer cmd, FontAtlas *atlas,
@@ -270,5 +278,3 @@ const char *text, float x, float y, float red = 1.0f, float green = 0.0f, float 
 AllocatedImage create_image(VulkanEngine *engine, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 AllocatedImage create_image(VulkanEngine *engine, void *data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 void destroy_image(VulkanEngine *engine, const AllocatedImage &img);
-
-bool howtoVulkan(VulkanEngine *engine, GameState *gameState);

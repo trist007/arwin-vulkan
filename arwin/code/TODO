@@ -1,4 +1,8 @@
-Bonus ImprovementsYou should not be creating a new staging buffer every frame for a simple quad. Consider making one persistent staging buffer for UI text or using a proper transient allocator later.
+===============================================================
+Bonus Improvements
+===============================================================
+
+You should not be creating a new staging buffer every frame for a simple quad. Consider making one persistent staging buffer for UI text or using a proper transient allocator later.
 You can make RenderText() take the staging buffer as a parameter or manage it internally.
 
 1. Add to VulkanEngine struct (in header)cpp
@@ -92,8 +96,9 @@ Much lower overhead (no per-frame allocation).
 Simpler and safer.
 Easy to extend later with a proper ring buffer if needed.
 
-
+===============================================================
 Adding more 3d models like monsters
+===============================================================
 
 Step-by-step: Adding a Third Model1. Add it to GameStatecpp
 
@@ -168,7 +173,9 @@ Extra Tips for Multiple ModelsYou can pass a model matrix per model if you want 
 For animated models, you’ll need to update skinning matrices per model.
 For performance with many models, you can combine static ones into one big buffer later.
 
-: howto in detail
+===============================================================
+howto in detail
+===============================================================
 Detailed breakdown of what howtoVulkan() is doing right now (after removing textures)Here’s the current flow, explained line-by-line:cpp
 
 // === 1. Load and upload the two glTF models to GPU ===
@@ -255,31 +262,9 @@ Separate resources for text rendering
 
 That’s why both models can use the exact same shader and descriptor set — they are designed to share those resources.
 
+=========================================================================
 2. Best-practice organization (recommended structure)howtoVulkan() → one-time initializationBreak it into small, well-named helper functions. This makes it crystal clear what belongs to the 3D world and what belongs to text/UI.cpp
-
-bool howtoVulkan(VulkanEngine* engine, GameState* gameState)
-{
-    // 1. Load and upload models
-    if (!load_and_upload_gltf_models(engine, gameState))
-        return false;
-
-    // 2. Create per-frame uniform buffers
-    create_per_frame_uniform_buffers(engine);
-
-    // 3. 3D pipeline resources (shared by room + character)
-    create_main_3d_descriptor_layout_and_set(engine);
-    create_main_graphics_pipeline(engine);
-
-    // 4. Text / UI resources (completely separate)
-    if (!setup_font_atlas_and_text_pipeline(engine))
-        return false;
-
-    SDL_Log("howtoVulkan() completed successfully");
-    return true;
-}
-
-drawHowtoVulkanEngine() → per-frame drawingcpp
-
+=========================================================================
 void drawHowtoVulkanEngine(VulkanEngine* engine, GameState* gameState)
 {
     FrameData& currentFrame = engine->frames[engine->frameIndex];

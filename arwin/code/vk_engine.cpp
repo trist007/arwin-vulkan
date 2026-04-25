@@ -1,5 +1,5 @@
 #include "vk_engine.h"
-#include "vk_images.h"
+//#include "vk_images.h"
 #include "vk_initializers.h"
 #include <stdio.h>
 #include <SDL3/SDL_video.h>
@@ -10,7 +10,7 @@
 #include "vk_mem_alloc.h"
 #include "vk_pipelines.h"
 
-#include "ktxvulkan.h"
+//#include "ktxvulkan.h"
 
 #include "HandmadeMath.h"
 
@@ -53,7 +53,7 @@ void initVulkanEngine(VulkanEngine *engine, GameState *gameState)
     // VkBootstrap
     init_vulkan(engine);
     init_swapchain(engine);
-    howtoVulkan(engine, gameState);
+    init_mezzanine(engine, gameState);
 
     // everything went fine
     engine->isInitialized = true;
@@ -223,7 +223,7 @@ void init_swapchain(VulkanEngine *engine) {
   drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
   drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-  VkImageCreateInfo rimg_info = vkinit::image_create_info(
+  VkImageCreateInfo rimg_info = image_create_info(
       engine->drawImage.imageFormat, drawImageUsages, drawImageExtent);
 
   VmaAllocationCreateInfo rimg_allocinfo = {};
@@ -261,7 +261,7 @@ void init_swapchain(VulkanEngine *engine) {
   VkImageUsageFlags depthImageUsages{};
   depthImageUsages |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 
-  VkImageCreateInfo dimg_info = vkinit::image_create_info(
+  VkImageCreateInfo dimg_info = image_create_info(
       engine->depthImage.imageFormat, depthImageUsages, drawImageExtent);
 
   // allocate and create the image
@@ -521,11 +521,6 @@ void howtoCleanupVulkanEngine(VulkanEngine *engine)
     if (engine->window)
         SDL_DestroyWindow(engine->window);
 
-    if (engine->glContext) {
-        SDL_GL_DestroyContext(engine->glContext);
-        engine->glContext = nullptr;
-    }
-
     SDL_Quit();
 }
 
@@ -574,7 +569,7 @@ void runVulkanEngine(VulkanEngine *engine, GameState *gameState) {
     //ImGui::Render();
 
     //drawVulkanEngine(engine);
-    drawHowtoVulkanEngine(engine, gameState);
+    mainRenderLoop(engine, gameState);
   }
 }
 
@@ -651,9 +646,8 @@ VertexInputDescription Vertex::get_vertex_description()
 }
 
 void
-drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
+mainRenderLoop(VulkanEngine *engine, GameState *gameState)
 {
-
     // === Destroy staging buffer from PREVIOUS frame ===
     if (engine->stagingBuffer != VK_NULL_HANDLE)
     {
@@ -1096,19 +1090,247 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
     engine->frameIndex = (engine->frameIndex + 1) % FRAME_OVERLAP;
 }
 
-bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
+bool init_mezzanine(VulkanEngine *engine, GameState *gameState)
 {
-    bool result = true;
+    load_and_upload_gltf_models(engine, gameState);
+ 
+    create_per_frame_uniform_buffers(engine);
+
+    create_main_3d_descriptor_layout_and_set(engine);
+
+    create_main_graphics_pipeline(engine);
+
+    setup_font_atlas_and_text_pipeline(engine);
+
+    return true;
+}
+
+void
+resize_swapchain(VulkanEngine *engine)
+{
+    if (engine->windowExtent.width == 0 || engine->windowExtent.height == 0)
+        return;   // minimized, don't resize
+
+    vkDeviceWaitIdle(engine->device);
+
+    destroy_swapchain(engine);
+
+        // Destroy offscreen images
+    if (engine->drawImage.imageView != VK_NULL_HANDLE)
+        vkDestroyImageView(engine->device, engine->drawImage.imageView, nullptr);
+    if (engine->drawImage.image != VK_NULL_HANDLE)
+        vmaDestroyImage(engine->allocator, engine->drawImage.image, engine->drawImage.allocation);
+
+    if (engine->depthImage.imageView != VK_NULL_HANDLE)
+        vkDestroyImageView(engine->device, engine->depthImage.imageView, nullptr);
+    if (engine->depthImage.image != VK_NULL_HANDLE)
+        vmaDestroyImage(engine->allocator, engine->depthImage.image, engine->depthImage.allocation);
+
+    // Get new window size
+    int w, h;
+    SDL_GetWindowSize(engine->window, &w, &h);
+    engine->windowExtent.width = (uint32_t)w;
+    engine->windowExtent.height = (uint32_t)h;
+
+    // Recreate swapchain
+    create_swapchain(engine, engine->windowExtent.width, engine->windowExtent.height);
+
+    // Recreate offscreen render targets (drawImage + depthImage)
+    VkExtent3D newExtent = { engine->windowExtent.width, engine->windowExtent.height, 1 };
+
+    // Recreate drawImage (HDR color target)
+    engine->drawImage = create_image(engine, newExtent, 
+                                     VK_FORMAT_R16G16B16A16_SFLOAT,
+                                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
+                                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | 
+                                     VK_IMAGE_USAGE_STORAGE_BIT | 
+                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 
+                                     false);
+
+    // Recreate depth image
+    engine->depthImage = create_image(engine, newExtent, 
+                                      engine->depthFormat,
+                                      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 
+                                      false);
+
+    engine->resize_requested = false;
+
+    SDL_Log("Swapchain and render targets resized to %ux%u", w, h);
+}
+
+AllocatedImage create_image(VulkanEngine* engine, VkExtent3D size,
+                            VkFormat format, VkImageUsageFlags usage,
+                            bool mipmapped)
+{
+    AllocatedImage newImage{};
+    newImage.imageFormat = format;
+    newImage.imageExtent = size;
+
+    VkImageCreateInfo img_info = image_create_info(format, usage, size);
 
 
-    // === REMOVE ALL THIS OLD CODE ===
-    // tinyobj::LoadObj(...)
-    // the big for loop that built vertices and indices from attrib
-    // the KTX texture loading loop
-    // engine->textureCount = 3;  etc.
+    if (mipmapped)
+    {
+        uint32_t maxDimension = MAX(size.width, size.height);
 
-    // === REPLACE WITH THIS ===
+        if(maxDimension == 0)
+        {
+            img_info.mipLevels = 1;
+        }
+        else
+        {
+            double logValue = log2((double)maxDimension);
+            img_info.mipLevels = (uint32_t)floor(logValue) + 1;
+        }
+    }
 
+    VmaAllocationCreateInfo allocInfo = {};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+    VK_CHECK(vmaCreateImage(engine->allocator, &img_info, &allocInfo,
+                            &newImage.image, &newImage.allocation, nullptr));
+
+    // Choose correct aspect flag
+    VkImageAspectFlags aspectFlag = VK_IMAGE_ASPECT_COLOR_BIT;
+    if (format == VK_FORMAT_D32_SFLOAT ||
+        format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+        format == VK_FORMAT_D24_UNORM_S8_UINT)
+    {
+        aspectFlag = VK_IMAGE_ASPECT_DEPTH_BIT;
+    }
+
+    VkImageViewCreateInfo view_info = vkinit::imageview_create_info(
+        format, newImage.image, aspectFlag);
+
+    view_info.subresourceRange.levelCount = img_info.mipLevels;
+
+    VK_CHECK(vkCreateImageView(engine->device, &view_info, nullptr,
+                               &newImage.imageView));
+
+    return newImage;
+}
+
+void destroy_image(VulkanEngine *engine, const AllocatedImage &img) {
+  vkDestroyImageView(engine->device, img.imageView, nullptr);
+  vmaDestroyImage(engine->allocator, img.image, img.allocation);
+}
+
+void RenderText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
+              const char* text, float screenX, float screenY,
+              float red, float green, float blue)
+{
+    if (!text || !atlas || atlas->atlasWidth == 0 || !engine->textPipeline) {
+        SDL_Log("ext: invalid input");
+        return;
+    }
+
+    int len = 0;
+    while (text[len]) ++len;
+    if (len == 0) return;
+
+    float cursorX = floor(screenX);
+    float cursorY = floor(screenY);
+
+    TextVertex* verts = (TextVertex*)alloca(len * 6 * sizeof(TextVertex));
+    int vertCount = 0;
+
+    for (int i = 0; i < len; ++i)
+    {
+        unsigned char c = (unsigned char)text[i];
+        if (c < 32 || c > 127) {
+            cursorX += 14.0f;
+            continue;
+        }
+
+        Glyph* g = &atlas->glyphs[c];
+
+        // baseline positioning
+        float charX = cursorX + g->xoff; // horizontal offset is fine
+        float charY = cursorY - atlas->baseline * 0.7f + g->yoff;
+        //float charY = cursorY + g->yoff; // top of glpyh
+
+        // quad corners in pixel space
+        float x0 = charX;
+        float y0 = charY;                    // top
+        float x1 = charX + (g->xoff2 - g->xoff);   // right  (more accurate than width)
+        float y1 = charY + (g->yoff2 - g->yoff);   // bottom (this is the key fix!)
+
+        // Convert to Vulkan NDC (-1..1, Y flipped)
+        float ndc_x0 = (x0 / engine->windowExtent.width)  * 2.0f - 1.0f;
+        float ndc_y0 = 1.0f - (y0 / engine->windowExtent.height) * 2.0f;   // top in NDC
+        float ndc_x1 = (x1 / engine->windowExtent.width)  * 2.0f - 1.0f;
+        float ndc_y1 = 1.0f - (y1 / engine->windowExtent.height) * 2.0f;   // bottom in NDC
+
+        // UVs (your existing flip + inset)
+        float u0 = g->u0, v0 = g->v1;
+        float u1 = g->u1, v1 = g->v0;
+
+        // small inset already baked in LoadFontAtlas
+
+        // Build vertices (counter-clockwise triangles)
+        verts[vertCount++] = {{ndc_x0, ndc_y0}, {u0, v0}};
+        verts[vertCount++] = {{ndc_x1, ndc_y0}, {u1, v0}};
+        verts[vertCount++] = {{ndc_x0, ndc_y1}, {u0, v1}};
+
+        verts[vertCount++] = {{ndc_x1, ndc_y0}, {u1, v0}};
+        verts[vertCount++] = {{ndc_x1, ndc_y1}, {u1, v1}};
+        verts[vertCount++] = {{ndc_x0, ndc_y1}, {u0, v1}};
+
+        // Advance cursor
+        cursorX += g->width + 6.0f;   // or better: pc->xadvance if you store it
+    }
+
+    if (vertCount == 0) return;
+
+    struct PushColor push = { red, green, blue, 1.0f };
+
+    vkCmdPushConstants(cmd, engine->textPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0, sizeof(push), &push);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipelineLayout,
+                            0, 1, &engine->textDescriptorSet, 0, nullptr);
+
+    // ====================== CREATE STAGING BUFFER ======================
+    VkBufferCreateInfo stagingCI = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = vertCount * sizeof(TextVertex),
+        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT   // ← add VERTEX_BUFFER_BIT
+    };
+
+    VmaAllocationCreateInfo stagingAllocCI = {
+        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .usage = VMA_MEMORY_USAGE_AUTO
+    };
+
+    VK_CHECK(vmaCreateBuffer(engine->allocator, &stagingCI, &stagingAllocCI,
+                             &engine->stagingBuffer, &engine->stagingAlloc, nullptr));
+
+    void* mapped;
+    vmaMapMemory(engine->allocator, engine->stagingAlloc, &mapped);
+    memcpy(mapped, verts, vertCount * sizeof(TextVertex));
+    vmaUnmapMemory(engine->allocator, engine->stagingAlloc);
+
+    // ====================== BIND VERTEX BUFFER ======================
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &engine->stagingBuffer, &offset);   // ← THIS WAS MISSING!
+
+    // Draw all characters at once (very efficient)
+    vkCmdDraw(cmd, vertCount, 1, 0, 0);
+
+    // ====================== DESTROY AFTER RECORDING ======================
+    // Move this destruction OUT of DrawText, just like you did for the red quad.
+    // For now (quick fix), you can keep it here temporarily if you want,
+    // but the proper place is after vkEndCommandBuffer in drawHowtoVulkanEngine.
+
+    //vmaDestroyBuffer(engine->allocator, stagingBuffer, stagingAlloc);
+
+}
+
+bool
+load_and_upload_gltf_models(VulkanEngine *engine, GameState *gameState)
+{
     gameState->model = load_gltf_model(gameState->arena, "../data/models/arwin8.glb");
 
     if (gameState->model.mesh.vertCount == 0) {
@@ -1141,6 +1363,12 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     SDL_Log("Successfully loaded and uploaded glTF room with %d vertices, %d indices", 
             gameState->room.mesh.vertCount, gameState->room.mesh.triCount);
 
+    return true;
+}
+
+bool
+create_per_frame_uniform_buffers(VulkanEngine *engine)
+{
     for (uint32_t i = 0; i < FRAME_OVERLAP; i++) {
         VkBufferCreateInfo uBufferCI{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -1207,6 +1435,12 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
         VK_CHECK(vkAllocateCommandBuffers(engine->device, &allocInfo, &engine->frames[i].commandBuffers));
     }
 
+    return true;
+}
+
+bool
+create_main_3d_descriptor_layout_and_set(VulkanEngine *engine)
+{
     // glb files do not have textures
     engine->textureCount = 0;
 
@@ -1360,6 +1594,12 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
 
     SDL_Log("Vulkan shader module created successfully");
 
+    return true;
+}
+
+bool
+create_main_graphics_pipeline(VulkanEngine *engine)
+{
     VkPushConstantRange pushConstantRange{
         .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset     = 0,
@@ -1532,6 +1772,12 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
 
     SDL_Log("Main 3D pipeline created successfully");
 
+    return true;
+}
+
+bool
+setup_font_atlas_and_text_pipeline(VulkanEngine *engine)
+{
     if(!LoadFontAtlas(engine, &engine->fontAtlas))
         SDL_Log("ERROR: LoadFontAtlas failed completely!");
 
@@ -1578,261 +1824,3 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
 
     return true;
 }
-
-void
-resize_swapchain(VulkanEngine *engine)
-{
-    if (engine->windowExtent.width == 0 || engine->windowExtent.height == 0)
-        return;   // minimized, don't resize
-
-    vkDeviceWaitIdle(engine->device);
-
-    destroy_swapchain(engine);
-
-        // Destroy offscreen images
-    if (engine->drawImage.imageView != VK_NULL_HANDLE)
-        vkDestroyImageView(engine->device, engine->drawImage.imageView, nullptr);
-    if (engine->drawImage.image != VK_NULL_HANDLE)
-        vmaDestroyImage(engine->allocator, engine->drawImage.image, engine->drawImage.allocation);
-
-    if (engine->depthImage.imageView != VK_NULL_HANDLE)
-        vkDestroyImageView(engine->device, engine->depthImage.imageView, nullptr);
-    if (engine->depthImage.image != VK_NULL_HANDLE)
-        vmaDestroyImage(engine->allocator, engine->depthImage.image, engine->depthImage.allocation);
-
-    // Get new window size
-    int w, h;
-    SDL_GetWindowSize(engine->window, &w, &h);
-    engine->windowExtent.width = (uint32_t)w;
-    engine->windowExtent.height = (uint32_t)h;
-
-    // Recreate swapchain
-    create_swapchain(engine, engine->windowExtent.width, engine->windowExtent.height);
-
-    // Recreate offscreen render targets (drawImage + depthImage)
-    VkExtent3D newExtent = { engine->windowExtent.width, engine->windowExtent.height, 1 };
-
-    // Recreate drawImage (HDR color target)
-    engine->drawImage = create_image(engine, newExtent, 
-                                     VK_FORMAT_R16G16B16A16_SFLOAT,
-                                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
-                                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | 
-                                     VK_IMAGE_USAGE_STORAGE_BIT | 
-                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 
-                                     false);
-
-    // Recreate depth image
-    engine->depthImage = create_image(engine, newExtent, 
-                                      engine->depthFormat,
-                                      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 
-                                      false);
-
-    engine->resize_requested = false;
-
-    SDL_Log("Swapchain and render targets resized to %ux%u", w, h);
-}
-
-AllocatedImage create_image(VulkanEngine* engine, VkExtent3D size,
-                            VkFormat format, VkImageUsageFlags usage,
-                            bool mipmapped)
-{
-    AllocatedImage newImage{};
-    newImage.imageFormat = format;
-    newImage.imageExtent = size;
-
-    VkImageCreateInfo img_info = vkinit::image_create_info(format, usage, size);
-
-
-    if (mipmapped)
-    {
-        uint32_t maxDimension = MAX(size.width, size.height);
-
-        if(maxDimension == 0)
-        {
-            img_info.mipLevels = 1;
-        }
-        else
-        {
-            double logValue = log2((double)maxDimension);
-            img_info.mipLevels = (uint32_t)floor(logValue) + 1;
-        }
-    }
-
-    VmaAllocationCreateInfo allocInfo = {};
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
-    VK_CHECK(vmaCreateImage(engine->allocator, &img_info, &allocInfo,
-                            &newImage.image, &newImage.allocation, nullptr));
-
-    // Choose correct aspect flag
-    VkImageAspectFlags aspectFlag = VK_IMAGE_ASPECT_COLOR_BIT;
-    if (format == VK_FORMAT_D32_SFLOAT ||
-        format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
-        format == VK_FORMAT_D24_UNORM_S8_UINT)
-    {
-        aspectFlag = VK_IMAGE_ASPECT_DEPTH_BIT;
-    }
-
-    VkImageViewCreateInfo view_info = vkinit::imageview_create_info(
-        format, newImage.image, aspectFlag);
-
-    view_info.subresourceRange.levelCount = img_info.mipLevels;
-
-    VK_CHECK(vkCreateImageView(engine->device, &view_info, nullptr,
-                               &newImage.imageView));
-
-    return newImage;
-}
-
-void destroy_image(VulkanEngine *engine, const AllocatedImage &img) {
-  vkDestroyImageView(engine->device, img.imageView, nullptr);
-  vmaDestroyImage(engine->allocator, img.image, img.allocation);
-}
-
-void RenderText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
-              const char* text, float screenX, float screenY,
-              float red, float green, float blue)
-{
-    if (!text || !atlas || atlas->atlasWidth == 0 || !engine->textPipeline) {
-        SDL_Log("ext: invalid input");
-        return;
-    }
-
-    int len = 0;
-    while (text[len]) ++len;
-    if (len == 0) return;
-
-    float cursorX = floor(screenX);
-    float cursorY = floor(screenY);
-
-    TextVertex* verts = (TextVertex*)alloca(len * 6 * sizeof(TextVertex));
-    int vertCount = 0;
-
-    for (int i = 0; i < len; ++i)
-    {
-        unsigned char c = (unsigned char)text[i];
-        if (c < 32 || c > 127) {
-            cursorX += 14.0f;
-            continue;
-        }
-
-        Glyph* g = &atlas->glyphs[c];
-
-        // baseline positioning
-        float charX = cursorX + g->xoff; // horizontal offset is fine
-        float charY = cursorY - atlas->baseline * 0.7f + g->yoff;
-        //float charY = cursorY + g->yoff; // top of glpyh
-
-        // quad corners in pixel space
-        float x0 = charX;
-        float y0 = charY;                    // top
-        float x1 = charX + (g->xoff2 - g->xoff);   // right  (more accurate than width)
-        float y1 = charY + (g->yoff2 - g->yoff);   // bottom (this is the key fix!)
-
-        // Convert to Vulkan NDC (-1..1, Y flipped)
-        float ndc_x0 = (x0 / engine->windowExtent.width)  * 2.0f - 1.0f;
-        float ndc_y0 = 1.0f - (y0 / engine->windowExtent.height) * 2.0f;   // top in NDC
-        float ndc_x1 = (x1 / engine->windowExtent.width)  * 2.0f - 1.0f;
-        float ndc_y1 = 1.0f - (y1 / engine->windowExtent.height) * 2.0f;   // bottom in NDC
-
-        // UVs (your existing flip + inset)
-        float u0 = g->u0, v0 = g->v1;
-        float u1 = g->u1, v1 = g->v0;
-
-        // small inset already baked in LoadFontAtlas
-
-        // Build vertices (counter-clockwise triangles)
-        verts[vertCount++] = {{ndc_x0, ndc_y0}, {u0, v0}};
-        verts[vertCount++] = {{ndc_x1, ndc_y0}, {u1, v0}};
-        verts[vertCount++] = {{ndc_x0, ndc_y1}, {u0, v1}};
-
-        verts[vertCount++] = {{ndc_x1, ndc_y0}, {u1, v0}};
-        verts[vertCount++] = {{ndc_x1, ndc_y1}, {u1, v1}};
-        verts[vertCount++] = {{ndc_x0, ndc_y1}, {u0, v1}};
-
-        // Advance cursor
-        cursorX += g->width + 6.0f;   // or better: pc->xadvance if you store it
-    }
-
-    if (vertCount == 0) return;
-
-    struct PushColor push = { red, green, blue, 1.0f };
-
-    vkCmdPushConstants(cmd, engine->textPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0, sizeof(push), &push);
-
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipelineLayout,
-                            0, 1, &engine->textDescriptorSet, 0, nullptr);
-
-    // ====================== CREATE STAGING BUFFER ======================
-    //VkBuffer stagingBuffer;
-    //VmaAllocation stagingAlloc;
-
-    VkBufferCreateInfo stagingCI = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = vertCount * sizeof(TextVertex),
-        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT   // ← add VERTEX_BUFFER_BIT
-    };
-
-    VmaAllocationCreateInfo stagingAllocCI = {
-        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        .usage = VMA_MEMORY_USAGE_AUTO
-    };
-
-    VK_CHECK(vmaCreateBuffer(engine->allocator, &stagingCI, &stagingAllocCI,
-                             &engine->stagingBuffer, &engine->stagingAlloc, nullptr));
-
-    void* mapped;
-    vmaMapMemory(engine->allocator, engine->stagingAlloc, &mapped);
-    memcpy(mapped, verts, vertCount * sizeof(TextVertex));
-    vmaUnmapMemory(engine->allocator, engine->stagingAlloc);
-
-    // ====================== BIND VERTEX BUFFER ======================
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &engine->stagingBuffer, &offset);   // ← THIS WAS MISSING!
-
-    // Draw all characters at once (very efficient)
-    vkCmdDraw(cmd, vertCount, 1, 0, 0);
-
-    // ====================== DESTROY AFTER RECORDING ======================
-    // Move this destruction OUT of DrawText, just like you did for the red quad.
-    // For now (quick fix), you can keep it here temporarily if you want,
-    // but the proper place is after vkEndCommandBuffer in drawHowtoVulkanEngine.
-
-    //vmaDestroyBuffer(engine->allocator, stagingBuffer, stagingAlloc);
-
-}
-
-/*
-bool init_opengl(VulkanEngine *engine)
-{
-    // Tell SDL we want OpenGL context
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
-
-    // Create the OpenGL context from your existing SDL window
-    engine->glContext = SDL_GL_CreateContext(engine->window);   // 'window' is your SDL_Window*
-    if (!engine->glContext) {
-        SDL_Log("Failed to create OpenGL context: %s", SDL_GetError());
-        return false;
-    }
-
-    // Initialize GLAD
-    if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
-        SDL_Log("Failed to initialize GLAD");
-        SDL_GL_DestroyContext(engine->glContext);
-        engine->glContext = nullptr;
-        return false;
-    }
-
-    SDL_Log("OpenGL initialized successfully!");
-    SDL_Log("OpenGL Version: %s", glGetString(GL_VERSION));
-    SDL_Log("GLSL Version: %s", glGetString(GL_SHADING_LANGUAGE_VERSION));
-
-    engine->hasOpenGL = true;
-    return true;
-}
-*/

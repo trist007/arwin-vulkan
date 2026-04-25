@@ -21,6 +21,7 @@ struct GameFont {
     int atlasWidth;
     int atlasHeight;
 };
+
 struct FontAtlas
 {
     VkImage image;
