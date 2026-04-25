@@ -99,7 +99,7 @@ struct FrameData
 
     ShaderDataBuffer shaderDataBuffers; // GPU buffer
     ShaderData shaderData;              // CPU data
-    VkCommandBuffer commandBuffers{VK_NULL_HANDLE};
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
 };
 
 struct ComputePushConstants
@@ -258,7 +258,13 @@ bool setup_font_atlas_and_text_pipeline(VulkanEngine *engine);
 
 // main render loop
 void mainRenderLoop(VulkanEngine *engine, GameState *gameState);
-bool update_shader_data(FrameData currentFrame, GameState *gameState);
+void update_shader_data(VulkanEngine *engine, GameState *gameState);
+void begin_frame(VulkanEngine *engine);
+void begin_rendering(VulkanEngine *engine, VkCommandBuffer cmd);
+void draw_3d_scene(VulkanEngine *engine, GameState *gameState, VkCommandBuffer cmd);
+void draw_ui_text(VulkanEngine *engine, VkCommandBuffer cmd);
+void end_rendering(VulkanEngine *engine, VkCommandBuffer cmd);
+void submit_and_present(VulkanEngine *engine);
 
 void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height);
 void destroy_swapchain(VulkanEngine *engine);

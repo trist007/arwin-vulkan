@@ -648,445 +648,44 @@ VertexInputDescription Vertex::get_vertex_description()
 void
 mainRenderLoop(VulkanEngine *engine, GameState *gameState)
 {
-    // === Destroy staging buffer from PREVIOUS frame ===
-    if (engine->stagingBuffer != VK_NULL_HANDLE)
-    {
-        vmaDestroyBuffer(engine->allocator, engine->stagingBuffer, engine->stagingAlloc);
-        engine->stagingBuffer = VK_NULL_HANDLE;
-        engine->stagingAlloc = VK_NULL_HANDLE;
-    }
-
-    // for glb
-    /*
-    vkCmdBindVertexBuffers(cmd, 0, 1, &engine->vBuffer, &vOffset);  // vOffset = 0
-    vkCmdBindIndexBuffer(cmd, engine->vBuffer, engine->indexBufferOffset, VK_INDEX_TYPE_UINT32);  // note: uint32 now
-    vkCmdDrawIndexed(cmd, engine->indexCount, 1, 0, 0, 0);   // instanceCount = 1 for now
-
-    I used VK_INDEX_TYPE_UINT32 because glTF often has more than 65k vertices.
-    If you want to support multiple meshes later, we can extend upload_gltf_to_gpu to create separate buffers per mesh.
-    Skinning (joints/weights) is already in the Vertex struct, so you can add the skinning matrix uniform later.
-    */
-
-    // get current frame
+    // Get current frame
     FrameData &currentFrame = engine->frames[engine->frameIndex];
 
-    // === Copy REAL glTF material colors ===
-    int numMaterials = gameState->model.mesh.materialCount;
+    // 1. Update all shader data (CPU → GPU)
+    update_shader_data(engine, gameState);
 
-    for (int m = 0; m < numMaterials && m < 8; ++m)
-    {
-        currentFrame.shaderData.baseColorFactor[m] = 
-            gameState->model.mesh.materials[m].baseColorFactor;
+    // 2. Prepare frame (fence, acquire image, etc.)
+    begin_frame(engine);
 
-    }
-    // Light position (make sure it's not too far)
-    currentFrame.shaderData.lightPos = HMM_V4(5.0f, 10.0f, 10.0f, 1.0f);
+    // Early out if resize was requested
+    if (engine->resize_requested) return;
 
-    // Copy skinning matrices
-    int jointCount = gameState->model.pose.jointCount;
+    VkCommandBuffer cmd = currentFrame.commandBuffer;
 
-    for (int j = 0; j < jointCount && j < 64; ++j)
-    {
-        currentFrame.shaderData.skinMatrices[j] = gameState->model.pose.skinMatrices[j];
-    }
-
-    // Fill remaining matrices with identity (good practice)
-    for (int j = jointCount; j < 64; ++j)
-    {
-        currentFrame.shaderData.skinMatrices[j] = HMM_M4D(1.0f);
-    }
-
-    // Then copy the whole ShaderData to the uniform buffer
-    memcpy(currentFrame.shaderDataBuffers.allocationInfo.pMappedData, 
-        &currentFrame.shaderData, 
-        sizeof(ShaderData));
-
-    // Wait on fence for the last frame the GPU has worked and reset it for the next submission
-    VK_CHECK(vkWaitForFences(engine->device, 1, &currentFrame.renderFence, true, UINT64_MAX));
-    VK_CHECK(vkResetFences(engine->device, 1, &currentFrame.renderFence));
-
-    // Acquire next image
-    //! NOTE(trist007): Semaphores
-    //! swapchainSemaphore is signaled by the presentation engine when the swapchain image is ready to be used.
-    //! renderSemaphore is usually signaled by the queue submission when rendering is finished, so the presentation can wait on it.
-    uint32_t imageIndex;
-    VkResult e = vkAcquireNextImageKHR(
-        engine->device,
-        engine->swapchain,
-        UINT64_MAX,
-        currentFrame.swapchainSemaphore,
-        VK_NULL_HANDLE,
-        &imageIndex
-    );
-
-    if(e == VK_ERROR_OUT_OF_DATE_KHR)
-    {
-        engine->resize_requested = true;
-        return;
-    }
-
-    engine->imageIndex = imageIndex;
-
-    // Camera and Projection
-    float aspect = (float)engine->windowExtent.width / (float)engine->windowExtent.height;
-
-    HMM_Mat4 proj = HMM_Perspective_RH_ZO(
-        HMM_AngleDeg(60.0f),
-        aspect,
-        0.1f,
-        1000.0f
-    );
-
-    proj.Elements[1][1] *= -1.0f;                    // ← Critical: Flip Y for Vulkan
-
-    HMM_Mat4 view = HMM_LookAt_RH(
-        HMM_V3(0.0f, 3.0f, 10.0f),      // camera position (move back!)
-        HMM_V3(0.0f, 0.0f, 0.0f),       // look at origin
-        HMM_V3(0.0f, 1.0f, 0.0f)
-    );
-
-    currentFrame.shaderData.projection = proj;
-    currentFrame.shaderData.view = view;
-
-    // Placement single mode matrix
-    HMM_Vec3 pos = HMM_V3(0.0f, -5.0f, 0.0f);
-
-    HMM_Mat4 modelMat = HMM_MulM4(
-    HMM_Translate(pos),
-    HMM_Scale(HMM_V3(5.0f, 5.0f, 5.0f))
-);
-
-    currentFrame.shaderData.model = modelMat;
-    currentFrame.shaderData.projection = proj;
-    currentFrame.shaderData.view = view;
-
-
-    memcpy(currentFrame.shaderDataBuffers.allocationInfo.pMappedData, &currentFrame.shaderData, sizeof(ShaderData));
-
-    // Record command buffer
-    VkCommandBuffer cmd = currentFrame.commandBuffers; 
     VK_CHECK(vkResetCommandBuffer(cmd, 0));
 
-    VkCommandBufferBeginInfo beginInfo {
+    VkCommandBufferBeginInfo beginInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
     };
-
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-        VkImageMemoryBarrier2 outputBarriers[2] = {
+    // 3. Start rendering
+    begin_rendering(engine, cmd);
 
-        VkImageMemoryBarrier2{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .srcAccessMask = 0,
-            .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .image = engine->swapchainImages[engine->imageIndex],
-            .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
-        },
-        VkImageMemoryBarrier2{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-            .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .image = engine->depthImage.image,
-            //.subresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, .levelCount = 1, .layerCount = 1 }
-            .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .layerCount = 1 }
-        }};
-    VkDependencyInfo barrierDependencyInfo{
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 2,
-        .pImageMemoryBarriers = outputBarriers
-    };
+    // 4. Draw 3D content
+    draw_3d_scene(engine, gameState, cmd);
 
-    vkCmdPipelineBarrier2(cmd, &barrierDependencyInfo);
+    // 5. Draw UI / Text
+    draw_ui_text(engine, cmd);
 
-    VkRenderingAttachmentInfo colorAttachmentInfo{
-        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = engine->swapchainImageViews[engine->imageIndex],
-        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .clearValue{.color{ 0.0f, 0.0f, 0.2f, 1.0f }} // RGB this is blue
-    };
-    VkRenderingAttachmentInfo depthAttachmentInfo{
-        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = engine->depthImage.imageView,
-        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        .clearValue = {.depthStencil = {1.0f,  0}}
-    };
+    // 6. Finish rendering
+    end_rendering(engine, cmd);
 
-    VkRenderingInfo renderingInfo{
-        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea{.extent{ .width = engine->windowExtent.width, .height = engine->windowExtent.height }},
-        .layerCount = 1,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &colorAttachmentInfo,
-        .pDepthAttachment = &depthAttachmentInfo
-    };
+    // 7. Submit and Present
+    submit_and_present(engine);
 
-    vkCmdBeginRendering(cmd, &renderingInfo);
-
-    // Set viewport and scissor
-    VkViewport vp = { .width = (float)engine->windowExtent.width, .height = (float)engine->windowExtent.height, .minDepth = 0.0f, .maxDepth = 1.0f };
-    vkCmdSetViewport(cmd, 0, 1, &vp);
-    VkRect2D scissor = { .extent = { engine->windowExtent.width, engine->windowExtent.height } };
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->graphicsPipeline);
-
-    // === BIND DESCRIPTOR SET (required for shaderData in vertex shader) ===
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->pipelineLayout,
-                            0, 1, &engine->descriptorSetTex, 0, nullptr);
-
-    VkDeviceSize vOffset = 0;
-
-    // === 1. Draw the ROOM ===
-    if (gameState->room.mesh.vertCount > 0)
-    {
-        vkCmdBindVertexBuffers(cmd, 0, 1, &gameState->room.vertexBuffer, &vOffset);
-        vkCmdBindIndexBuffer(cmd, gameState->room.vertexBuffer, 
-                            gameState->room.indexBufferOffset, VK_INDEX_TYPE_UINT32);
-
-        for (int i = 0; i < gameState->room.mesh.primitiveCount; ++i)
-        {
-            Primitive* prim = &gameState->room.mesh.primitives[i];
-
-            float r = ((prim->color >>  0) & 0xFF) / 255.0f;
-            float g = ((prim->color >>  8) & 0xFF) / 255.0f;
-            float b = ((prim->color >> 16) & 0xFF) / 255.0f;
-
-            struct PushColor { float r, g, b, a; } push = { r, g, b, 1.0f };
-
-            vkCmdPushConstants(cmd, engine->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
-                            0, sizeof(push), &push);
-
-            vkCmdDrawIndexed(cmd, prim->triCount * 3, 1, prim->triOffset * 3, 0, 0);
-        }
-    }
-
-    // === 2. Draw the CHARACTER ===
-    if (gameState->model.mesh.vertCount > 0)
-    {
-        vkCmdBindVertexBuffers(cmd, 0, 1, &gameState->model.vertexBuffer, &vOffset);
-        vkCmdBindIndexBuffer(cmd, gameState->model.vertexBuffer, 
-                            gameState->model.indexBufferOffset, VK_INDEX_TYPE_UINT32);
-
-        for (int i = 0; i < gameState->model.mesh.primitiveCount; ++i)
-        {
-            Primitive* prim = &gameState->model.mesh.primitives[i];
-
-            float r = ((prim->color >>  0) & 0xFF) / 255.0f;
-            float g = ((prim->color >>  8) & 0xFF) / 255.0f;
-            float b = ((prim->color >> 16) & 0xFF) / 255.0f;
-
-            struct PushColor { float r, g, b, a; } push = { r, g, b, 1.0f };
-
-            vkCmdPushConstants(cmd, engine->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
-                            0, sizeof(push), &push);
-
-            vkCmdDrawIndexed(cmd, prim->triCount * 3, 1, prim->triOffset * 3, 0, 0);
-        }
-    }
-
-    // draw text
-    
-   // Disable depth completely for text
-    
-    /*
-  {
-    SDL_Log("=== DRAWING FULL SCREEN RED QUAD WITH CORRECT VERTEX FORMAT ===");
-    // Use the same TextVertex struct as the rest of your code
-    TextVertex quad[6] = {
-        { {-0.9f,  0.9f}, {0.0f, 0.0f} },
-        { { 0.9f,  0.9f}, {1.0f, 0.0f} },
-        { {-0.9f, -0.9f}, {0.0f, 1.0f} },
-
-        { { 0.9f,  0.9f}, {1.0f, 0.0f} },
-        { { 0.9f, -0.9f}, {1.0f, 1.0f} },
-        { {-0.9f, -0.9f}, {0.0f, 1.0f} }
-    };
-
-    struct PushColor push = {1.0f, 0.0f, 0.0f, 1.0f}; // solid red
-
-    // Bind descriptor set (required!)
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
-                            engine->textPipelineLayout, 
-                            0, 1, &engine->textDescriptorSet, 0, nullptr);
-
-    vkCmdPushConstants(cmd, engine->textPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0, sizeof(push), &push);
-
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipeline);
-
-    // Create and bind vertex buffer
-    VkBuffer stagingBuffer;
-    VmaAllocation stagingAlloc;
-    void* mapped;
-
-    VkBufferCreateInfo stagingCI = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = 6 * sizeof(TextVertex),
-        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
-    };
-
-    VmaAllocationCreateInfo stagingAllocCI = {
-        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        .usage = VMA_MEMORY_USAGE_AUTO
-    };
-
-    VK_CHECK(vmaCreateBuffer(engine->allocator, &stagingCI, &stagingAllocCI,
-                             &stagingBuffer, &stagingAlloc, nullptr));
-
-    vmaMapMemory(engine->allocator, stagingAlloc, &mapped);
-    memcpy(mapped, quad, 6 * sizeof(TextVertex));
-    vmaUnmapMemory(engine->allocator, stagingAlloc);
-
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &stagingBuffer, &offset);
-
-    vkCmdDraw(cmd, 6, 1, 0, 0);
-
-    vmaDestroyBuffer(engine->allocator, stagingBuffer, stagingAlloc);
-
-    SDL_Log("Full screen red quad submitted");
-  }  
-    */
-        
-    /*
-    SDL_Log("=== DRAWING SOLID RED QUAD WITH HMM_Vec2 ===");
-
-    TextVertex quad[6] = {
-        { HMM_V2(-0.9f,  0.9f), HMM_V2(0.0f, 1.0f) },   // top-left  -> bottom-left UV
-        { HMM_V2( 0.9f,  0.9f), HMM_V2(1.0f, 1.0f) },   // top-right -> bottom-right UV
-        { HMM_V2(-0.9f, -0.9f), HMM_V2(0.0f, 0.0f) },   // bottom-left -> top-left UV
-
-        { HMM_V2( 0.9f,  0.9f), HMM_V2(1.0f, 1.0f) },
-        { HMM_V2( 0.9f, -0.9f), HMM_V2(1.0f, 0.0f) },
-        { HMM_V2(-0.9f, -0.9f), HMM_V2(0.0f, 0.0f) }
-    };
-
-    struct PushColor push = {1.0f, 0.0f, 0.0f, 1.0f}; // solid red
-
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
-                            engine->textPipelineLayout, 
-                            0, 1, &engine->textDescriptorSet, 0, nullptr);
-
-    vkCmdPushConstants(cmd, engine->textPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0, sizeof(push), &push);
-
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipeline);
-
-    VkBuffer stagingBuffer;
-    VmaAllocation stagingAlloc;
-    void* mapped;
-
-    VkBufferCreateInfo stagingCI = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = 6 * sizeof(TextVertex),
-        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
-    };
-
-    VmaAllocationCreateInfo stagingAllocCI = {
-        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        .usage = VMA_MEMORY_USAGE_AUTO
-    };
-
-    VK_CHECK(vmaCreateBuffer(engine->allocator, &stagingCI, &stagingAllocCI, &stagingBuffer, &stagingAlloc, nullptr));
-
-    vmaMapMemory(engine->allocator, stagingAlloc, &mapped);
-    memcpy(mapped, quad, 6 * sizeof(TextVertex));
-    vmaUnmapMemory(engine->allocator, stagingAlloc);
-
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &stagingBuffer, &offset);
-
-    vkCmdDraw(cmd, 6, 1, 0, 0);
-
-
-
-    SDL_Log("Solid red quad submitted");
-    */
-
-    // Add this line:
-    vkCmdSetDepthTestEnable(cmd, VK_FALSE);
-    vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
-    VkBuffer  tempStagingBuffer = engine->stagingBuffer;
-    VmaAllocation tempStagingAlloc = engine->stagingAlloc;
-    RenderText(engine, cmd, &engine->fontAtlas, "HELLO", 100.0f, 280.0f, 1.0f, 1.0f, 1.0f);
-    RenderText(engine, cmd, &engine->fontAtlas, "Hello world", 100.0f, 340.0f, 1.0f, 1.0f, 1.0f);
-
-    //SDL_Log("Before DrawText - textPipeline = %p, textPipelineLayout = %p, textDescriptorSet = %p", 
-    //    (void*)engine->textPipeline, (void*)engine->textPipelineLayout, (void*)engine->textDescriptorSet);
-    //DrawText(engine, cmd, &engine->fontAtlas, "HELLO", 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
-    vkCmdEndRendering(cmd);
-
-    // transition swapchain image that we just used as an attachment
-    VkImageMemoryBarrier2 barrierPresent{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstAccessMask = 0,
-        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .image = engine->swapchainImages[engine->imageIndex],
-        .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
-    };
-    VkDependencyInfo barrierPresentDependencyInfo{
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &barrierPresent
-    };
-    vkCmdPipelineBarrier2(cmd, &barrierPresentDependencyInfo);
-
-    // end command buffer
-    vkEndCommandBuffer(cmd);
-
-    // was causing Validation Error: [ VUID-vkDestroyBuffer-buffer-00922 ] | MessageID = 0xe4549c11
-    //vmaDestroyBuffer(engine->allocator, tempStagingBuffer, tempStagingAlloc);
-
-    // Submit command buffer
-    VkPipelineStageFlags waitStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    //VkPipelineStageFlags waitStages = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSubmitInfo submitInfo{
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &currentFrame.swapchainSemaphore,
-        .pWaitDstStageMask = &waitStages,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &cmd,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &engine->renderSemaphores[imageIndex]
-    };
-    VK_CHECK(vkQueueSubmit(engine->graphicsQueue, 1, &submitInfo, currentFrame.renderFence));
-
-    // Present image
-    VkPresentInfoKHR presentInfo{
-        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &engine->renderSemaphores[imageIndex],
-        .swapchainCount = 1,
-        .pSwapchains = &engine->swapchain,
-        .pImageIndices = &engine->imageIndex
-    };
-
-    VkResult presentResult = vkQueuePresentKHR(engine->graphicsQueue, &presentInfo);
-    if(presentResult == VK_ERROR_OUT_OF_DATE_KHR)
-    {
-        engine->resize_requested = true;
-        return;
-    }
-
-    // Advance frame index at the VERY END
+    // Advance frame
     engine->frameIndex = (engine->frameIndex + 1) % FRAME_OVERLAP;
 }
 
@@ -1432,7 +1031,7 @@ create_per_frame_uniform_buffers(VulkanEngine *engine)
             .commandBufferCount = 1
         };
 
-        VK_CHECK(vkAllocateCommandBuffers(engine->device, &allocInfo, &engine->frames[i].commandBuffers));
+        VK_CHECK(vkAllocateCommandBuffers(engine->device, &allocInfo, &engine->frames[i].commandBuffer));
     }
 
     return true;
@@ -1823,4 +1422,420 @@ setup_font_atlas_and_text_pipeline(VulkanEngine *engine)
     SDL_Log("depthFormat           = %d", (int)engine->depthFormat);
 
     return true;
+}
+
+void
+update_shader_data(VulkanEngine *engine, GameState *gameState)
+{
+    FrameData &currentFrame = engine->frames[engine->frameIndex];
+
+    // === Materials ===
+    int numMaterials = gameState->model.mesh.materialCount;
+    for (int m = 0; m < numMaterials && m < 8; ++m)
+    {
+        currentFrame.shaderData.baseColorFactor[m] = 
+            gameState->model.mesh.materials[m].baseColorFactor;
+    }
+
+    // === Light ===
+    currentFrame.shaderData.lightPos = HMM_V4(5.0f, 10.0f, 10.0f, 1.0f);
+
+    // === Skinning ===
+    int jointCount = gameState->model.pose.jointCount;
+    for (int j = 0; j < jointCount && j < 64; ++j)
+    {
+        currentFrame.shaderData.skinMatrices[j] = gameState->model.pose.skinMatrices[j];
+    }
+    for (int j = jointCount; j < 64; ++j)
+    {
+        currentFrame.shaderData.skinMatrices[j] = HMM_M4D(1.0f);
+    }
+
+    // === Camera + Projection ===
+    float aspect = (float)engine->windowExtent.width / (float)engine->windowExtent.height;
+
+    HMM_Mat4 proj = HMM_Perspective_RH_ZO(HMM_AngleDeg(60.0f), aspect, 0.1f, 1000.0f);
+    proj.Elements[1][1] *= -1.0f;        // Vulkan Y flip
+
+    HMM_Mat4 view = HMM_LookAt_RH(
+        HMM_V3(0.0f, 3.0f, 10.0f),
+        HMM_V3(0.0f, 0.0f, 0.0f),
+        HMM_V3(0.0f, 1.0f, 0.0f)
+    );
+
+    // === Model matrix ===
+    HMM_Mat4 modelMat = HMM_MulM4(
+        HMM_Translate(HMM_V3(0.0f, -5.0f, 0.0f)),
+        HMM_Scale(HMM_V3(5.0f, 5.0f, 5.0f))
+    );
+
+    currentFrame.shaderData.projection = proj;
+    currentFrame.shaderData.view       = view;
+    currentFrame.shaderData.model      = modelMat;
+
+    // Send to GPU (persistent mapped buffer)
+    memcpy(currentFrame.shaderDataBuffers.allocationInfo.pMappedData,
+           &currentFrame.shaderData,
+           sizeof(ShaderData));
+}
+
+void
+begin_frame(VulkanEngine *engine)
+{
+    FrameData &currentFrame = engine->frames[engine->frameIndex];
+
+    // =============================================
+    // 1. Destroy staging buffer from PREVIOUS frame
+    // =============================================
+    if (engine->stagingBuffer != VK_NULL_HANDLE)
+    {
+        vmaDestroyBuffer(engine->allocator, engine->stagingBuffer, engine->stagingAlloc);
+        engine->stagingBuffer = VK_NULL_HANDLE;
+        engine->stagingAlloc = VK_NULL_HANDLE;
+    }
+
+    // =============================================
+    // 2. Wait for GPU to finish with this frame
+    // =============================================
+    VK_CHECK(vkWaitForFences(engine->device, 
+                             1, 
+                             &currentFrame.renderFence, 
+                             VK_TRUE, 
+                             UINT64_MAX));
+
+    VK_CHECK(vkResetFences(engine->device, 
+                           1, 
+                           &currentFrame.renderFence));
+
+    // =============================================
+    // 3. Acquire next swapchain image
+    // =============================================
+    uint32_t imageIndex;
+    VkResult result = vkAcquireNextImageKHR(
+        engine->device,
+        engine->swapchain,
+        UINT64_MAX,                    // timeout
+        currentFrame.swapchainSemaphore,
+        VK_NULL_HANDLE,                // fence
+        &imageIndex);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+    {
+        engine->resize_requested = true;
+        return;
+    }
+    else if (result != VK_SUCCESS)
+    {
+        SDL_Log("vkAcquireNextImageKHR failed: %d", result);
+        engine->resize_requested = true;
+        return;
+    }
+
+    engine->imageIndex = imageIndex;
+}
+
+void
+begin_rendering(VulkanEngine *engine, VkCommandBuffer cmd)
+{
+    // === 1. Pipeline Barriers (Swapchain + Depth Image) ===
+    VkImageMemoryBarrier2 outputBarriers[2] = {
+        // Swapchain image barrier
+        {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .srcAccessMask = 0,
+            .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .image = engine->swapchainImages[engine->imageIndex],
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1
+            }
+        },
+        // Depth image barrier
+        {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+            .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+            .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            .image = engine->depthImage.image,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                .levelCount = 1,
+                .layerCount = 1
+            }
+        }
+    };
+
+    VkDependencyInfo barrierDependencyInfo = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 2,
+        .pImageMemoryBarriers = outputBarriers
+    };
+
+    vkCmdPipelineBarrier2(cmd, &barrierDependencyInfo);
+
+    // === 2. Rendering Attachments ===
+    VkRenderingAttachmentInfo colorAttachmentInfo = {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = engine->swapchainImageViews[engine->imageIndex],
+        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = { .color = { 0.0f, 0.0f, 0.2f, 1.0f } }   // dark blue background
+    };
+
+    VkRenderingAttachmentInfo depthAttachmentInfo = {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = engine->depthImage.imageView,
+        .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .clearValue = { .depthStencil = { 1.0f, 0 } }
+    };
+
+    // === 3. Begin Rendering ===
+    VkRenderingInfo renderingInfo = {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .renderArea = {
+            .offset = { 0, 0 },
+            .extent = engine->windowExtent
+        },
+        .layerCount = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &colorAttachmentInfo,
+        .pDepthAttachment = &depthAttachmentInfo
+    };
+
+    vkCmdBeginRendering(cmd, &renderingInfo);
+
+    // === 4. Viewport and Scissor ===
+    VkViewport viewport = {
+        .x = 0.0f,
+        .y = 0.0f,
+        .width = (float)engine->windowExtent.width,
+        .height = (float)engine->windowExtent.height,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f
+    };
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    VkRect2D scissor = {
+        .offset = { 0, 0 },
+        .extent = engine->windowExtent
+    };
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    // === 5. Bind Graphics Pipeline and Descriptor Set ===
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->graphicsPipeline);
+
+    vkCmdBindDescriptorSets(cmd, 
+                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            engine->pipelineLayout,
+                            0,                      // first set
+                            1,                      // set count
+                            &engine->descriptorSetTex,
+                            0, nullptr);
+}
+
+void
+draw_3d_scene(VulkanEngine *engine, GameState *gameState, VkCommandBuffer cmd)
+{
+    VkDeviceSize offset = 0;
+
+    // ======================
+    // 1. Draw the ROOM
+    // ======================
+    if (gameState->room.mesh.vertCount > 0)
+    {
+        // Bind room geometry
+        vkCmdBindVertexBuffers(cmd, 0, 1, &gameState->room.vertexBuffer, &offset);
+        vkCmdBindIndexBuffer(cmd, 
+                             gameState->room.vertexBuffer,
+                             gameState->room.indexBufferOffset,
+                             VK_INDEX_TYPE_UINT32);
+
+        // Draw each primitive/submesh
+        for (int i = 0; i < gameState->room.mesh.primitiveCount; ++i)
+        {
+            Primitive* prim = &gameState->room.mesh.primitives[i];
+
+            // Convert packed color to float
+            float r = ((prim->color >>  0) & 0xFF) / 255.0f;
+            float g = ((prim->color >>  8) & 0xFF) / 255.0f;
+            float b = ((prim->color >> 16) & 0xFF) / 255.0f;
+
+            struct PushColor {
+                float r, g, b, a;
+            } push = { r, g, b, 1.0f };
+
+            vkCmdPushConstants(cmd,
+                               engine->pipelineLayout,
+                               VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0,
+                               sizeof(push),
+                               &push);
+
+            vkCmdDrawIndexed(cmd,
+                             prim->triCount * 3,   // index count
+                             1,                    // instance count
+                             prim->triOffset * 3,  // first index
+                             0,                    // vertex offset
+                             0);                   // first instance
+        }
+    }
+
+    // ======================
+    // 2. Draw the CHARACTER / MODEL
+    // ======================
+    if (gameState->model.mesh.vertCount > 0)
+    {
+        // Bind model geometry
+        vkCmdBindVertexBuffers(cmd, 0, 1, &gameState->model.vertexBuffer, &offset);
+        vkCmdBindIndexBuffer(cmd,
+                             gameState->model.vertexBuffer,
+                             gameState->model.indexBufferOffset,
+                             VK_INDEX_TYPE_UINT32);
+
+        // Draw each primitive/submesh
+        for (int i = 0; i < gameState->model.mesh.primitiveCount; ++i)
+        {
+            Primitive* prim = &gameState->model.mesh.primitives[i];
+
+            float r = ((prim->color >>  0) & 0xFF) / 255.0f;
+            float g = ((prim->color >>  8) & 0xFF) / 255.0f;
+            float b = ((prim->color >> 16) & 0xFF) / 255.0f;
+
+            struct PushColor {
+                float r, g, b, a;
+            } push = { r, g, b, 1.0f };
+
+            vkCmdPushConstants(cmd,
+                               engine->pipelineLayout,
+                               VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0,
+                               sizeof(push),
+                               &push);
+
+            vkCmdDrawIndexed(cmd,
+                             prim->triCount * 3,
+                             1,
+                             prim->triOffset * 3,
+                             0,
+                             0);
+        }
+    }
+}
+
+void
+draw_ui_text(VulkanEngine *engine, VkCommandBuffer cmd)
+{
+    vkCmdSetDepthTestEnable(cmd, VK_FALSE);
+    vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
+
+    // Bind text pipeline + descriptor set
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            engine->textPipelineLayout, 0, 1,
+                            &engine->textDescriptorSet, 0, nullptr);
+
+    RenderText(engine, cmd, &engine->fontAtlas, "HELLO", 100.0f, 280.0f, 1.0f, 1.0f, 1.0f);
+    RenderText(engine, cmd, &engine->fontAtlas, "Hello world", 100.0f, 340.0f, 1.0f, 1.0f, 1.0f);
+
+    // Re-enable depth for next frame (good practice)
+    vkCmdSetDepthTestEnable(cmd, VK_TRUE);
+    vkCmdSetDepthWriteEnable(cmd, VK_TRUE);
+}
+
+void
+end_rendering(VulkanEngine *engine, VkCommandBuffer cmd)
+{
+    // End the dynamic rendering
+    vkCmdEndRendering(cmd);
+
+    // Transition swapchain image from COLOR_ATTACHMENT_OPTIMAL → PRESENT_SRC_KHR
+    VkImageMemoryBarrier2 presentBarrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        
+        .srcStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        
+        .dstStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstAccessMask = 0,
+        
+        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,   // or ATTACHMENT_OPTIMAL
+        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        
+        .image = engine->swapchainImages[engine->imageIndex],
+        
+        .subresourceRange = {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        }
+    };
+
+    VkDependencyInfo dependencyInfo = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers    = &presentBarrier
+    };
+
+    vkCmdPipelineBarrier2(cmd, &dependencyInfo);
+}
+
+void
+submit_and_present(VulkanEngine *engine)
+{
+    FrameData &currentFrame = engine->frames[engine->frameIndex];
+    VkCommandBuffer cmd = currentFrame.commandBuffer;
+
+    // End command buffer recording
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    // Submit to queue
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+    VkSubmitInfo submitInfo = {
+        .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .waitSemaphoreCount   = 1,
+        .pWaitSemaphores      = &currentFrame.swapchainSemaphore,
+        .pWaitDstStageMask    = &waitStage,
+        .commandBufferCount   = 1,
+        .pCommandBuffers      = &cmd,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores    = &engine->renderSemaphores[engine->imageIndex]
+    };
+
+    VK_CHECK(vkQueueSubmit(engine->graphicsQueue, 1, &submitInfo, currentFrame.renderFence));
+
+    // Present
+    VkPresentInfoKHR presentInfo = {
+        .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores    = &engine->renderSemaphores[engine->imageIndex],
+        .swapchainCount     = 1,
+        .pSwapchains        = &engine->swapchain,
+        .pImageIndices      = &engine->imageIndex
+    };
+
+    VkResult presentResult = vkQueuePresentKHR(engine->graphicsQueue, &presentInfo);
+
+    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR)
+    {
+        engine->resize_requested = true;
+    }
+    else if (presentResult != VK_SUCCESS)
+    {
+        // Optional: log error, but don't crash in release
+        SDL_Log("vkQueuePresentKHR failed: %d", presentResult);
+    }
 }
