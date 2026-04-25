@@ -16,12 +16,11 @@
 
 #include "initVulkan.h"
 
+#define TINYOBJLOADER_DISABLE_FAST_FLOAT
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
 
 #include "vk_loader.h"
-
-#define MAX_SWAPCHAIN_IMAGES 4
 
 constexpr bool bUseValidationLayers = true;
 
@@ -71,8 +70,6 @@ void init_vulkan(VulkanEngine *engine) {
         SDL_Log("Error: Invalid engine or window passed to init_vulkan\n");
         return;
     }
-
-    VkResult result;
 
     // ------------------- 1. Create Vulkan Instance -------------------
     uint32_t instanceVersion = 0;
@@ -148,9 +145,13 @@ void init_vulkan(VulkanEngine *engine) {
 
     DeviceInformation deviceInfo = {};
 
+
     VkPhysicalDevice chosenDevice = VK_NULL_HANDLE;
     uint32_t bestQueueFamily = UINT32_MAX;
     int bestScore = -1;
+
+    SDL_Log("device count = %d", deviceCount);
+    SDL_Log("engine->instance: %p\n engine->surface: %p", engine->instance, engine->surface);
 
     for (uint32_t i = 0; i < deviceCount; ++i) {
         int score = evalDevice(engine->instance, engine->surface,
@@ -204,14 +205,6 @@ void init_vulkan(VulkanEngine *engine) {
     // the handle by value at push time
     engine->mainDeletionQueue.push_function(
         [=]() { vmaDestroyAllocator(engine->allocator); });
-
-  
-    // initializing SDL3_TTF
-    if (TTF_Init() == -1) {
-        SDL_Log("TTF_Init failed: %s", SDL_GetError());
-    } else {
-        SDL_Log("TTF initialized successfully");
-    }
 }
 
 void init_swapchain(VulkanEngine *engine) {
@@ -660,6 +653,15 @@ VertexInputDescription Vertex::get_vertex_description()
 void
 drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
 {
+
+    // === Destroy staging buffer from PREVIOUS frame ===
+    if (engine->stagingBuffer != VK_NULL_HANDLE)
+    {
+        vmaDestroyBuffer(engine->allocator, engine->stagingBuffer, engine->stagingAlloc);
+        engine->stagingBuffer = VK_NULL_HANDLE;
+        engine->stagingAlloc = VK_NULL_HANDLE;
+    }
+
     // for glb
     /*
     vkCmdBindVertexBuffers(cmd, 0, 1, &engine->vBuffer, &vOffset);  // vOffset = 0
@@ -1025,8 +1027,8 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
     vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
     VkBuffer  tempStagingBuffer = engine->stagingBuffer;
     VmaAllocation tempStagingAlloc = engine->stagingAlloc;
-    DrawText(engine, cmd, &engine->fontAtlas, "HELLO", 100.0f, 280.0f, 1.0f, 1.0f, 1.0f);
-    DrawText(engine, cmd, &engine->fontAtlas, "Hello world", 100.0f, 340.0f, 1.0f, 1.0f, 1.0f);
+    RenderText(engine, cmd, &engine->fontAtlas, "HELLO", 100.0f, 280.0f, 1.0f, 1.0f, 1.0f);
+    RenderText(engine, cmd, &engine->fontAtlas, "Hello world", 100.0f, 340.0f, 1.0f, 1.0f, 1.0f);
 
     //SDL_Log("Before DrawText - textPipeline = %p, textPipelineLayout = %p, textDescriptorSet = %p", 
     //    (void*)engine->textPipeline, (void*)engine->textPipelineLayout, (void*)engine->textDescriptorSet);
@@ -1055,7 +1057,8 @@ drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState)
     // end command buffer
     vkEndCommandBuffer(cmd);
 
-    vmaDestroyBuffer(engine->allocator, tempStagingBuffer, tempStagingAlloc);
+    // was causing Validation Error: [ VUID-vkDestroyBuffer-buffer-00922 ] | MessageID = 0xe4549c11
+    //vmaDestroyBuffer(engine->allocator, tempStagingBuffer, tempStagingAlloc);
 
     // Submit command buffer
     VkPipelineStageFlags waitStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -1204,209 +1207,22 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
         VK_CHECK(vkAllocateCommandBuffers(engine->device, &allocInfo, &engine->frames[i].commandBuffers));
     }
 
-    // there are 3 ktx files in assets
-    engine->textureCount = 3;
-    VkDescriptorImageInfo textureDescriptors[(engine->textureCount)];
+    // glb files do not have textures
+    engine->textureCount = 0;
 
-    char *filename = "../data/assets/suzanne";
-
-    // Loading textures
-    for (uint32_t i = 0; i < engine->textureCount; i++)
-    {
-        ktxTexture* ktxTexture{ nullptr };
-
-        // Filename will decay into const char* when passed to function that expects const char*
-        char FileName[32] = {};
-
-        sprintf(FileName, "%s%d.ktx", filename, i);
-        SDL_Log("FileName = %s", FileName);
-        KTX_error_code ret = ktxTexture_CreateFromNamedFile(FileName, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTexture);
-
-        if(ret != KTX_SUCCESS || ktxTexture == nullptr)
-        {
-            SDL_Log("current working directory: %s", SDL_GetCurrentDirectory());
-            SDL_Log("Error: failed to load texture %s (error: %d)", filename, ret);
-            abort();
-        }
-
-        VkImageCreateInfo texImgCI{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = ktxTexture_GetVkFormat(ktxTexture),
-        .extent = {.width = ktxTexture->baseWidth, .height = ktxTexture->baseHeight, .depth = 1 },
-        .mipLevels = ktxTexture->numLevels,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-        };
-
-        VmaAllocationCreateInfo texImageAllocCI{ .usage = VMA_MEMORY_USAGE_AUTO };
-        VK_CHECK(vmaCreateImage(engine->allocator, &texImgCI, &texImageAllocCI, &engine->textures[i].image, &engine->textures[i].allocation, nullptr));
-
-        VkImageViewCreateInfo texVewCI{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = engine->textures[i].image,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = texImgCI.format,
-        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = ktxTexture->numLevels, .layerCount = 1 }
-        };
-
-        VK_CHECK(vkCreateImageView(engine->device, &texVewCI, nullptr, &engine->textures[i].view));
-
-        VkBuffer imgSrcBuffer{};
-        VmaAllocation imgSrcAllocation{};
-        VkBufferCreateInfo imgSrcBufferCI{
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .size = (uint32_t)ktxTexture->dataSize,
-            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
-        };
-        VmaAllocationCreateInfo imgSrcAllocCI{
-            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-            .usage = VMA_MEMORY_USAGE_AUTO
-        };
-
-        VmaAllocationInfo imgSrcAllocInfo{};
-
-        VK_CHECK(vmaCreateBuffer(engine->allocator, &imgSrcBufferCI, &imgSrcAllocCI, &imgSrcBuffer, &imgSrcAllocation, &imgSrcAllocInfo));
-
-        memcpy(imgSrcAllocInfo.pMappedData, ktxTexture->pData, ktxTexture->dataSize);
-
-        VkFenceCreateInfo fenceOneTimeCI{
-            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
-        };
-
-        VkFence fenceOneTime{};
-        VK_CHECK(vkCreateFence(engine->device, &fenceOneTimeCI, nullptr, &fenceOneTime));
-        VkCommandBuffer cbOneTime{};
-        VkCommandBufferAllocateInfo cbOneTimeAI{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .commandPool = engine->commandPool,
-            .commandBufferCount = 1
-        };
-        VK_CHECK(vkAllocateCommandBuffers(engine->device, &cbOneTimeAI, &cbOneTime));
-
-        VkCommandBufferBeginInfo cbOneTimeBI{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-        };
-
-        VK_CHECK(vkBeginCommandBuffer(cbOneTime, &cbOneTimeBI));
-        VkImageMemoryBarrier2 barrierTexImage{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
-            .srcAccessMask = VK_ACCESS_2_NONE,
-            .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .image = engine->textures[i].image,
-            .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = ktxTexture->numLevels, .layerCount = 1 }
-        };
-        VkDependencyInfo barrierTexInfo{
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &barrierTexImage
-        };
-
-        vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
-
-        VkBufferImageCopy *copyRegions = (VkBufferImageCopy*)arenaAlloc(engine->arena, ktxTexture->numLevels * sizeof(VkBufferImageCopy));   
-        for (uint32_t j = 0; j < ktxTexture->numLevels; j++)
-        {
-            ktx_size_t mipOffset{0};
-            KTX_error_code ret = ktxTexture_GetImageOffset(ktxTexture, j, 0, 0, &mipOffset);
-
-            copyRegions[j] = (VkBufferImageCopy){
-                .bufferOffset = mipOffset,
-                .imageSubresource = {
-                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .mipLevel = j,
-                    .baseArrayLayer = 0,
-                    .layerCount = 1
-                },
-                .imageExtent = {
-                    .width = ktxTexture->baseWidth >> j,
-                    .height = ktxTexture->baseHeight >> j,
-                    .depth = 1
-                }
-            };
-        }
-
-        vkCmdCopyBufferToImage(cbOneTime, imgSrcBuffer, engine->textures[i].image,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            (uint32_t)ARRAYSIZE(copyRegions),
-            copyRegions);
-
-        VkImageMemoryBarrier2 barrierTexRead{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
-            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .newLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-            .image = engine->textures[i].image,
-            .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = ktxTexture->numLevels, .layerCount = 1 }
-        };
-        barrierTexInfo.pImageMemoryBarriers = &barrierTexRead;
-
-        vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
-
-        VK_CHECK(vkEndCommandBuffer(cbOneTime));
-
-        VkSubmitInfo oneTimeSI{
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &cbOneTime
-        };
-        VK_CHECK(vkQueueSubmit(engine->graphicsQueue, 1, &oneTimeSI, fenceOneTime));
-        VK_CHECK(vkWaitForFences(engine->device, 1, &fenceOneTime, VK_TRUE, UINT64_MAX));
-
-        VkSamplerCreateInfo samplerCI{
-            .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-            .magFilter = VK_FILTER_LINEAR,
-            .minFilter = VK_FILTER_LINEAR,
-            .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-            .anisotropyEnable = VK_TRUE,
-            .maxAnisotropy = 8.0f, // 8 is a widely supported value for max anisotropy
-            .maxLod = (float)ktxTexture->numLevels,
-        };
-        VK_CHECK(vkCreateSampler(engine->device, &samplerCI, nullptr, &engine->textures[i].sampler));
-
-        ktxTexture_Destroy(ktxTexture);
-
-        textureDescriptors[i].sampler = engine->textures[i].sampler;
-        textureDescriptors[i].imageView = engine->textures[i].view;
-        textureDescriptors[i].imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
-    }
-
-    VkDescriptorBindingFlags descVariableFlag{ VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT };
-    VkDescriptorSetLayoutBindingFlagsCreateInfo descBindingFlags{
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
-        .bindingCount = 1,
-        .pBindingFlags = &descVariableFlag
-    };
-
-    VkDescriptorSetLayoutBinding bindings[2] = {};
+    VkDescriptorSetLayoutBinding bindings[1] = {};
 
     // Binding 0: Textures array
     bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[0].descriptorCount = engine->textureCount;
-    bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    // Binding 1: ShaderData uniform buffer
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
     // We no longer need variable descriptor count flags for binding 0 in this simple case
     VkDescriptorSetLayoutCreateInfo descLayoutCI{
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 2,
+        .bindingCount = 1,
         .pBindings = bindings
     };
 
@@ -1414,18 +1230,15 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
 
 
     // === Descriptor Pool (must support both types) ===
-    VkDescriptorPoolSize poolSizes[2] = {};
+    VkDescriptorPoolSize poolSizes[1] = {};
 
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = engine->textureCount;
-
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[1].descriptorCount = FRAME_OVERLAP * 2;   // one per frame is safe
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[0].descriptorCount = FRAME_OVERLAP * 2;   // one per frame is safe
 
     VkDescriptorPoolCreateInfo descPoolCI{
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .maxSets = 1,
-        .poolSizeCount = 2,
+        .poolSizeCount = 1,
         .pPoolSizes = poolSizes
     };
 
@@ -1441,74 +1254,7 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
 
     VK_CHECK(vkAllocateDescriptorSets(engine->device, &texDescSetAlloc, &engine->descriptorSetTex));
 
-    // Binding 0: Textures (array)
-    /*
-    VkDescriptorSetLayoutBinding descLayoutBindingTex{
-        .binding = 0,
-        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = engine->textureCount,
-        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
-    };
-
-    // Binding 1: ShaderData (ConstantBuffer)
-    VkDescriptorSetLayoutBinding descLayoutBindingShaderData{
-        .binding = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .descriptorCount = 1,
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-    };
-
-    std::array<VkDescriptorSetLayoutBinding, 2> bindings = { descLayoutBindingTex, descLayoutBindingShaderData };
-
-    VkDescriptorSetLayoutCreateInfo descLayoutTexCI{
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .pNext = &descBindingFlags,
-        .bindingCount = 2,
-        //.pBindings = &descLayoutBindingTex
-        .pBindings = bindings.data()
-    };
-    VK_CHECK(vkCreateDescriptorSetLayout(engine->device, &descLayoutTexCI, nullptr, &engine->descriptorSetLayoutTex));
-
-    VkDescriptorPoolSize poolSize{
-        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = engine->textureCount
-    };
-    VkDescriptorPoolCreateInfo descPoolCI{
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .maxSets = 1,
-        .poolSizeCount = 1,
-        .pPoolSizes = &poolSize
-    };
-    VK_CHECK(vkCreateDescriptorPool(engine->device, &descPoolCI, nullptr, &engine->descriptorPool));
-
-    uint32_t variableDescCount{ engine->textureCount };
-
-    VkDescriptorSetVariableDescriptorCountAllocateInfo variableDescCountAI{
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT,
-        .descriptorSetCount = 1,
-        .pDescriptorCounts = &variableDescCount
-    };
-    VkDescriptorSetAllocateInfo texDescSetAlloc{
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .pNext = &variableDescCountAI,
-        .descriptorPool = engine->descriptorPool,
-        .descriptorSetCount = 1,
-        .pSetLayouts = &engine->descriptorSetLayoutTex
-    };
-    VK_CHECK(vkAllocateDescriptorSets(engine->device, &texDescSetAlloc, &engine->descriptorSetTex));
-    */
-
-    // Update existing texture write (binding 0)
-    VkWriteDescriptorSet writeTex{
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = engine->descriptorSetTex,
-        .dstBinding = 0,
-        .descriptorCount = engine->textureCount,
-        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 
-        .pImageInfo = textureDescriptors
-    };
-
-    // New write for shaderData (binding 1)
+    // New write for shaderData (binding 0)
     VkDescriptorBufferInfo shaderDataBufferInfo{
         .buffer = engine->frames[0].shaderDataBuffers.buffer,   // use one from current frame
         .offset = 0,
@@ -1518,15 +1264,13 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     VkWriteDescriptorSet writeShaderData{
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstSet = engine->descriptorSetTex,
-        .dstBinding = 1,
+        .dstBinding = 0,
         .descriptorCount = 1,
         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         .pBufferInfo = &shaderDataBufferInfo
     };
 
-    const VkWriteDescriptorSet writes[2] = { writeTex, writeShaderData };
-
-    vkUpdateDescriptorSets(engine->device, 2, writes, 0, nullptr);
+    vkUpdateDescriptorSets(engine->device, 1, &writeShaderData, 0, nullptr);
 
     // Loading shaders
     //Slang::ComPtr<slang::IGlobalSession> globalSession;
@@ -1643,7 +1387,7 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
         * sizeof(VkVertexInputAttributeDescription));
 
     // Location 0: Position
-    vertexAttributes[0] = (VkVertexInputAttributeDescription){
+    vertexAttributes[0] = VkVertexInputAttributeDescription{
         .location = 0,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32B32_SFLOAT,
@@ -1651,7 +1395,7 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     };
 
     // Location 1: Normal
-    vertexAttributes[1] = (VkVertexInputAttributeDescription){
+    vertexAttributes[1] = VkVertexInputAttributeDescription{
         .location = 1,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32B32_SFLOAT,
@@ -1659,7 +1403,7 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     };
 
     // Location 2: Texcoord
-    vertexAttributes[2] = (VkVertexInputAttributeDescription){
+    vertexAttributes[2] = VkVertexInputAttributeDescription{
         .location = 2,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32_SFLOAT,
@@ -1667,7 +1411,7 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     };
 
     // Location 3: Color
-    vertexAttributes[3] = (VkVertexInputAttributeDescription){
+    vertexAttributes[3] = VkVertexInputAttributeDescription{
         .location = 3,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
@@ -1675,7 +1419,7 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     };
 
     // Location 4: Joints (uint8_t[4])
-    vertexAttributes[4] = (VkVertexInputAttributeDescription){
+    vertexAttributes[4] = VkVertexInputAttributeDescription{
         .location = 4,
         .binding  = 0,
         .format   = VK_FORMAT_R8G8B8A8_UINT,
@@ -1683,7 +1427,7 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     };
 
     // Location 5: Weights
-    vertexAttributes[5] = (VkVertexInputAttributeDescription){
+    vertexAttributes[5] = VkVertexInputAttributeDescription{
         .location = 5,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
@@ -1759,7 +1503,6 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
     };
     VkPipelineRasterizationStateCreateInfo rasterizationState{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .polygonMode = VK_POLYGON_MODE_FILL,
         .cullMode = VK_CULL_MODE_NONE,      // ← Disable culling for testing
         .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
@@ -1821,17 +1564,17 @@ bool howtoVulkan(VulkanEngine *engine, GameState *gameState)
         SDL_Log("Failed to create text pipeline");
     }
     // === TEXT PIPELINE DEBUG ===
-SDL_Log("=== TEXT PIPELINE DEBUG ===");
-SDL_Log("textPipeline          = %p", (void*)engine->textPipeline);
-SDL_Log("textPipelineLayout    = %p", (void*)engine->textPipelineLayout);
-SDL_Log("textDescriptorSet     = %p", (void*)engine->textDescriptorSet);
-SDL_Log("textDescriptorSetLayout = %p", (void*)engine->textDescriptorSetLayout);
-SDL_Log("textShaderModule      = %p", (void*)engine->textShaderModule);
-SDL_Log("fontAtlas.imageView   = %p", (void*)engine->fontAtlas.imageView);
-SDL_Log("fontAtlas.sampler     = %p", (void*)engine->fontAtlas.sampler);
-SDL_Log("fontAtlas.atlasWidth  = %d", engine->fontAtlas.atlasWidth);
-SDL_Log("swapchainImageFormat  = %d", (int)engine->swapchainImageFormat);
-SDL_Log("depthFormat           = %d", (int)engine->depthFormat);
+    SDL_Log("=== TEXT PIPELINE DEBUG ===");
+    SDL_Log("textPipeline          = %p", (void*)engine->textPipeline);
+    SDL_Log("textPipelineLayout    = %p", (void*)engine->textPipelineLayout);
+    SDL_Log("textDescriptorSet     = %p", (void*)engine->textDescriptorSet);
+    SDL_Log("textDescriptorSetLayout = %p", (void*)engine->textDescriptorSetLayout);
+    SDL_Log("textShaderModule      = %p", (void*)engine->textShaderModule);
+    SDL_Log("fontAtlas.imageView   = %p", (void*)engine->fontAtlas.imageView);
+    SDL_Log("fontAtlas.sampler     = %p", (void*)engine->fontAtlas.sampler);
+    SDL_Log("fontAtlas.atlasWidth  = %d", engine->fontAtlas.atlasWidth);
+    SDL_Log("swapchainImageFormat  = %d", (int)engine->swapchainImageFormat);
+    SDL_Log("depthFormat           = %d", (int)engine->depthFormat);
 
     return true;
 }
@@ -1947,12 +1690,12 @@ void destroy_image(VulkanEngine *engine, const AllocatedImage &img) {
   vmaDestroyImage(engine->allocator, img.image, img.allocation);
 }
 
-void DrawText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
+void RenderText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
               const char* text, float screenX, float screenY,
               float red, float green, float blue)
 {
     if (!text || !atlas || atlas->atlasWidth == 0 || !engine->textPipeline) {
-        SDL_Log("DrawText: invalid input");
+        SDL_Log("ext: invalid input");
         return;
     }
 

@@ -242,8 +242,9 @@ evalDevice(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevice device, D
 
     vkGetPhysicalDeviceProperties(device, &properties);
 
-    SDL_Log("Device %u: %s\n", properties.deviceName);
-    strncpy(deviceInfo->name, properties.deviceName, sizeof(deviceInfo->name) - 1);
+   //SDL_Log("Device: %s\n", deviceName);
+    //strncpy(deviceInfo->name, properties.deviceName, sizeof(deviceInfo->name) - 1);
+    //snprintf(deviceInfo->name, sizeof(deviceInfo->name), "%s", properties.deviceName);
     SDL_Log("  Vendor ID: 0x%X\n", properties.vendorID);
     SDL_Log("  Device ID: 0x%X\n", properties.deviceID);
     SDL_Log("  Device Type: %d\n", properties.deviceType);
@@ -251,6 +252,16 @@ evalDevice(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevice device, D
             VK_VERSION_MAJOR(properties.apiVersion),
             VK_VERSION_MINOR(properties.apiVersion),
             VK_VERSION_PATCH(properties.apiVersion));
+
+    if (device != nullptr)
+    {
+        //strncpy(deviceInfo->name, deviceName, sizeof(deviceName) - 1);
+        //deviceInfo->name[sizeof(deviceInfo->name) - 1] = '\0';   // Guarantee null-termination
+    }
+    else
+    {
+        SDL_Log("WARNING: deviceInfo pointer is NULL!");
+    }
 
     // === Get Queue Family Count ===
     uint32_t queueFamilyCount = 0;
@@ -289,7 +300,11 @@ evalDevice(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevice device, D
                 canPresent ? "Yes" : "No",
                 queueFamilies[q].queueCount);
 
-        deviceInfo->queueFamilyIndex = q;
+        if(isGraphics && canPresent)
+        {
+            deviceInfo->queueFamilyIndex = q;
+            break;
+        }
     }
 
     u32 extensionCount = 0;

@@ -9,13 +9,13 @@
 #include "vk_mem_alloc.h"
 
 #include "HandmadeMath.h"
-#include <SDL3/SDL.h>
+#include "SDL3/SDL.h"
 
 #include "arena.h"
 #include "cgltf.h"
 
 
-#define ARRAYSIZE(arr) (uint32_t)(sizeof(arr) / sizeof(arr[0]))
+#define ArraySize(arr) (uint32_t)(sizeof(arr) / sizeof(arr[0]))
 #define CLAMP(v, low, high) ((v) < (low) ? (low) : (v) > (high) ? (high) : (v))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 

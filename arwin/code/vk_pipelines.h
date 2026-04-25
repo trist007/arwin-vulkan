@@ -3,6 +3,7 @@
 #include "vk_types.h"
 #include "vk_engine.h"
 
+/*
 namespace vkutil
 {
     bool load_shader_module(const char* filePath, VkDevice device, VkShaderModule *outShaderModule);
@@ -39,6 +40,7 @@ void disable_depthtest(PipelineBuilder *pipe);
 void enable_depthtest(PipelineBuilder *pipe, bool depthWriteEnable, VkCompareOp op);
 void enable_blending_additive(PipelineBuilder *pipe);
 void enable_blending_alphablend(PipelineBuilder *pipe);
+*/
 bool create_text_descriptor_layout(VulkanEngine *engine);
 bool create_text_pipeline(VulkanEngine *engine);
 bool update_text_descriptors(VulkanEngine* engine);

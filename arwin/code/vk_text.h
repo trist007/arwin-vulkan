@@ -1,6 +1,6 @@
-#pragma once
+#ifndef VK_TEXT_H
+#define VK_TEXT_H
 
-#include <SDL3_ttf/SDL_ttf.h>
 #include "vk_types.h"
 #include "stb_truetype.h"
 
@@ -43,3 +43,5 @@ struct TextVertex
     HMM_Vec2 position;   // screen space (-1 to 1)
     HMM_Vec2 uv;
 };
+
+#endif

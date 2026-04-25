@@ -15,21 +15,17 @@ set /a BUILD_COUNT+=1
 echo %BUILD_COUNT% > %COUNTER_FILE%
 echo BUILD #%BUILD_COUNT%
 
+echo cwd: %CD%
+set VULKAN_SDK_PATH=C:\VulkanSDK\1.4.341.1\
+
 REM LIBRARIES
-set SDL_LIB=..\arwin\external\SDL3-3.4.2\lib\x64\SDL3.lib
-set SDLIMAGE_LIB=..\arwin\external\SDL3_image-3.4.0\lib\x64\SDL3_image.lib
-set SDLTTF_LIB=..\arwin\external\SDL3_ttf-3.2.2\lib\x64\SDL3_ttf.lib
-set VULKAN_LIB=..\arwin\code\vulkan-1.lib
+set VULKAN_LIB=%VULKAN_SDK_PATH%\Lib\vulkan-1.lib
+set SDL3_LIB=%VULKAN_SDK_PATH%\Lib\SDL3.lib
+set SLANG_LIB=%VULKAN_SDK_PATH%\Lib\slang.lib
 
 REM INCLUDES
-set SDL_Include=/I"..\arwin\external\SDL3-3.4.2\include"
-set SDLIMAGE_Include=/I"..\arwin\external\SDL3_image-3.4.0\include"
-set SDLTTF_Include=/I"..\arwin\external\SDL3_ttf-3.2.2\include"
-set FASTGLTF_Includes=/I"..\arwin\external\fastgltf-0.6.0\include"
-set GLM_Includes=/I"..\arwin\external\glm-1.0.3"
-REM set FMT_Include=/I"..\arwin\external\fmt-12.1.0\include" // can just use std::format in c++20
-
-set VULKAN_INCLUDE=/I"..\arwin\code"
+set VULKAN_SDK_INCLUDES=/I%VULKAN_SDK_PATH%\Include
+set INCLUDES=/I.
 
 REM for debug /DDEBUG enabled the DEBUG define
 
@@ -41,64 +37,78 @@ set CommonCompilerFlags=/utf-8 /std:c++20 /EHsc ^
     /MD -nologo -fp:fast -Gm- -Od -Oi -WX -W4 ^
     /Zc:threadSafeInit- ^
     /D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR ^
-    -wd4202 -wd4100 -wd4189 -wd4244 -wd4996 -wd4456 -wd4324 -FC -Z7 ^
-    %SDL_Include% %SDLIMAGE_Include% %SDLTTF_Include% %VULKAN_INCLUDE% %FASTGLTF_Includes% %GLM_Includes% ^
-    /DGLM_ENABLE_EXPERIMENTAL
+    -wd4202 -wd4100 -wd4189 -wd4244 -wd4996 -wd4456 -wd4324 -wd4505 -FC -Z7 ^
+    %VULKAN_SDK_INCLUDES% %INCLUDES%
 
-set CommonLinkerFlags=-incremental:no -opt:ref /DEBUG /PDB:main.pdb %SDL_LIB% %SDLIMAGE_LIB% %SDLTTF_LIB% %VULKAN_LIB%
+set CommonLinkerFlags=-incremental:no -opt:ref /DEBUG /PDB:main.pdb %VULKAN_LIB% %SDL3_LIB% %SLANG_LIB%
 
 REM echo Updating etags
 REM echo,
 REM etags *.cpp *.h raylib\*.c
 
-IF NOT EXIST ..\..\build mkdir ..\..\build
-pushd ..\..\build
-copy /Y ..\arwin\external\SDL3-3.4.2\lib\x64\SDL3.dll . > NUL
-copy /Y ..\arwin\external\SDL3_image-3.4.0\lib\x64\SDL3_image.dll . > NUL
-copy /Y ..\arwin\external\SDL3_ttf-3.2.2\lib\x64\SDL3_ttf.dll . > NUL
+IF NOT EXIST ..\bin mkdir ..\bin
+pushd ..\bin
 
 REM delete pdb because debugger maintains a lock on pdb so pdb cannot be overwritten
 del *.pdb > NUL 2> NUL
 
-cl %CommonCompilerFlags% -wd4715 -wd4267 -wd4458 ^
-    ..\arwin\external\fastgltf-0.6.0\src\fastgltf.cpp ^
-    /c /Fofastgltf.obj
-
-cl %CommonCompilerFlags% -wd4715 -wd4267 -wd4458 ^
-    ..\arwin\external\fastgltf-0.6.0\src\base64.cpp ^
-    /c /Fobase64.obj
-
-cl %CommonCompilerFlags% -wd4127 -wd4505 -wd4715 -wd4267 -wd4458 ^
-    ..\arwin\code\simdjson.cpp ^
-    /c /Fosimdjson.obj
 
 cl %CommonCompilerFlags% ^
-    ..\arwin\code\main.cpp ^
-    ..\arwin\code\vk_engine.cpp ^
-    ..\arwin\code\vk_initializers.cpp ^
-    ..\arwin\code\vk_images.cpp ^
-    ..\arwin\code\VkBootstrap.cpp ^
-    ..\arwin\code\vk_descriptors.cpp ^
-    ..\arwin\code\vk_pipelines.cpp ^
-    ..\arwin\code\vk_loader.cpp ^
-    ..\arwin\code\camera.cpp ^
-    ..\arwin\code\imgui.cpp ^
-    ..\arwin\code\imgui_demo.cpp ^
-    ..\arwin\code\imgui_draw.cpp ^
-    ..\arwin\code\imgui_tables.cpp ^
-    ..\arwin\code\imgui_widgets.cpp ^
-    ..\arwin\code\imgui_impl_sdl3.cpp ^
-    ..\arwin\code\imgui_impl_vulkan.cpp ^
-    fastgltf.obj base64.obj simdjson.obj ^
+    ..\code\main.cpp ^
+    ..\code\arena.cpp ^
+    ..\code\initVulkan.cpp ^
+    ..\code\vk_engine.cpp ^
+    ..\code\vk_initializers.cpp ^
+    ..\code\vk_images.cpp ^
+    ..\code\vk_descriptors.cpp ^
+    ..\code\vk_pipelines.cpp ^
+    ..\code\vk_loader.cpp ^
+    ..\code\camera.cpp ^
     /link %CommonLinkerFlags%
+
 REM/Fe:win32_arwin.exe
+
+    REM ==================== ImGui (temporarily disabled) ====================
+    REM ..\arwin\code\imgui.cpp ^
+    REM ..\arwin\code\imgui_demo.cpp ^
+    REM ..\arwin\code\imgui_draw.cpp ^
+    REM ..\arwin\code\imgui_tables.cpp ^
+    REM ..\arwin\code\imgui_widgets.cpp ^
+    REM ..\arwin\code\imgui_impl_sdl3.cpp ^
+    REM ..\arwin\code\imgui_impl_vulkan.cpp ^
 
 popd
 
 REM capture end time and calculate the difference
 set END_TIME=%time%
-set END_TIME=%END_TIME: =%
+set END_TIME=%END_TIME: =0%   REM replace spaces with zeros (for single-digit hours)
 
+REM Remove any leading zeros safely for calculation
+set START_H=%START_TIME:~0,2%
+set START_M=%START_TIME:~3,2%
+set START_S=%START_TIME:~6,2%
+set START_MS=%START_TIME:~9,2%
+
+set END_H=%END_TIME:~0,2%
+set END_M=%END_TIME:~3,2%
+set END_S=%END_TIME:~6,2%
+set END_MS=%END_TIME:~9,2%
+
+REM Convert to total seconds
+set /a START_TOTAL=(((START_H*60)+START_M)*60)+START_S
+set /a END_TOTAL=(((END_H*60)+END_M)*60)+END_S
+
+set /a TOTAL_SEC=%END_TOTAL% - %START_TOTAL%
+if %TOTAL_SEC% LSS 0 set /a TOTAL_SEC+=86400
+
+REM Milliseconds
+set /a TOTAL_MS=%END_MS% - %START_MS%
+if %TOTAL_MS% LSS 0 (
+    set /a TOTAL_MS+=1000
+    set /a TOTAL_SEC-=1
+)
+
+if %TOTAL_MS% LSS 10 set TOTAL_MS=0%TOTAL_MS%
 
 
 echo.
@@ -107,3 +117,6 @@ if %errorlevel% equ 0 (
                        ) else (
                                echo Compilation failed with errors at %date% %time%
                                )
+
+echo ================================================
+echo Build #%BUILD_COUNT% completed in %TOTAL_SEC%.%TOTAL_MS%s

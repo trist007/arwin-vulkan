@@ -27,7 +27,7 @@ struct ShaderData {
     float4x4 skinMatrices[64];
 };
 
-[[vk::binding(1, 0)]]
+[[vk::binding(0, 0)]]
 ConstantBuffer<ShaderData> shaderData;
 
 [shader("vertex")]

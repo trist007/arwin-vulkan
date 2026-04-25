@@ -196,8 +196,8 @@ VkDescriptorSet DescriptorAllocatorGrowable::allocate(VkDevice device, VkDescrip
     VkDescriptorPool poolToUse = get_pool(device);
 
 	VkDescriptorSetAllocateInfo allocInfo = {
-	.pNext = pNext,
 	.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+	.pNext = pNext,
 	.descriptorPool = poolToUse,
 	.descriptorSetCount = 1,
 	.pSetLayouts = &layout
@@ -239,8 +239,8 @@ void DescriptorWriter::write_buffer(int binding, VkBuffer buffer, size_t size, s
 	VkWriteDescriptorSet write = {
         
     .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-	.dstBinding = (uint32_t)binding,
 	.dstSet = VK_NULL_HANDLE, //left empty for now until we need to write it
+	.dstBinding = (uint32_t)binding,
 	.descriptorCount = 1,
 	.descriptorType = type,
 	.pBufferInfo = &info
@@ -260,8 +260,8 @@ void DescriptorWriter::write_image(int binding,VkImageView image, VkSampler samp
 	VkWriteDescriptorSet write = {
         
     .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-	.dstBinding = (uint32_t)binding,
 	.dstSet = VK_NULL_HANDLE, //left empty for now until we need to write it
+	.dstBinding = (uint32_t)binding,
 	.descriptorCount = 1,
 	.descriptorType = type,
 	.pImageInfo = &info

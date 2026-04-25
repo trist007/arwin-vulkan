@@ -2,6 +2,7 @@
 #include <fstream>
 #include "vk_initializers.h"
 
+/*
 bool vkutil::load_shader_module(const char* filePath,
     VkDevice device,
     VkShaderModule* outShaderModule)
@@ -196,7 +197,6 @@ VkPipeline build_pipeline(PipelineBuilder *pipe, VkDevice device)
 
     return newPipeline;
 }
-*/
 
 void set_shaders(PipelineBuilder *pipe, VkShaderModule vertexShader, VkShaderModule fragmentShader)
 {
@@ -317,10 +317,11 @@ void enable_blending_alphablend(PipelineBuilder *pipe)
     pipe->colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
     pipe->colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 }
+*/
 
 bool create_text_descriptor_layout(VulkanEngine* engine)
 {
-    VkDescriptorSetLayoutBinding bindings[2] = {};
+    VkDescriptorSetLayoutBinding bindings[1] = {};
 
     // Binding 0: Font texture (Combined Image + Sampler)
     bindings[0].binding = 0;
@@ -336,10 +337,24 @@ bool create_text_descriptor_layout(VulkanEngine* engine)
 
     VK_CHECK(vkCreateDescriptorSetLayout(engine->device, &layoutCI, nullptr, &engine->textDescriptorSetLayout));
 
+        // === IMPORTANT: Create a proper pool for the text descriptor ===
+    VkDescriptorPoolSize poolSize[1] = {};
+    poolSize[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSize[0].descriptorCount = 1;        // only need 1 for text
+
+    VkDescriptorPoolCreateInfo poolCI{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = 1,
+        .poolSizeCount = 1,
+        .pPoolSizes = poolSize
+    };
+
+    VK_CHECK(vkCreateDescriptorPool(engine->device, &poolCI, nullptr, &engine->textDescriptorPool));
+
     // Allocate the descriptor set
     VkDescriptorSetAllocateInfo allocInfo = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool = engine->descriptorPool,
+        .descriptorPool = engine->textDescriptorPool,
         .descriptorSetCount = 1,
         .pSetLayouts = &engine->textDescriptorSetLayout
     };
@@ -392,7 +407,7 @@ bool create_text_pipeline(VulkanEngine* engine)
     SDL_Log("=== Starting create_text_pipeline ===");
 
     // ===================================================================
-    // 1. Load dedicated text shader (text.slang)
+    // 1. Load and compile text shader
     // ===================================================================
     size_t sourceSize = 0;
     void* sourceData = SDL_LoadFile("../data/assets/text.slang", &sourceSize);
@@ -401,26 +416,31 @@ bool create_text_pipeline(VulkanEngine* engine)
         return false;
     }
 
-    // Create Slang session for text shader
-    auto targets = std::to_array<slang::TargetDesc>({{
-        .format = SLANG_SPIRV,
-        .profile = engine->slangGlobalSession->findProfile("spirv_1_6")
-    }});
-
-    auto options = std::to_array<slang::CompilerOptionEntry>({{
-        slang::CompilerOptionName::EmitSpirvDirectly,
-        {slang::CompilerOptionValueKind::Int, 1}
-    }});
-
-    slang::SessionDesc sessionDesc{
-        .targets = targets.data(),
-        .targetCount = SlangInt(targets.size()),
-        .defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR,
-        .compilerOptionEntries = options.data(),
-        .compilerOptionEntryCount = uint32_t(options.size())
-    };
+    if (!engine->slangGlobalSession) {
+        SDL_Log("ERROR: slangGlobalSession not created yet!");
+        SDL_free(sourceData);
+        return false;
+    }
 
     Slang::ComPtr<slang::ISession> textSession;
+    slang::TargetDesc target = {
+        .format = SLANG_SPIRV,
+        .profile = engine->slangGlobalSession->findProfile("spirv_1_6")
+    };
+
+    slang::CompilerOptionEntry option = {
+        .name = slang::CompilerOptionName::EmitSpirvDirectly,
+        .value = { .kind = slang::CompilerOptionValueKind::Int, .intValue0 = 1 }
+    };
+
+    slang::SessionDesc sessionDesc{
+        .targets = &target,
+        .targetCount = 1,
+        .defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR,
+        .compilerOptionEntries = &option,
+        .compilerOptionEntryCount = 1
+    };
+
     if (engine->slangGlobalSession->createSession(sessionDesc, textSession.writeRef()) != SLANG_OK || !textSession) {
         SDL_Log("ERROR: Failed to create text Slang session");
         SDL_free(sourceData);
@@ -431,10 +451,7 @@ bool create_text_pipeline(VulkanEngine* engine)
     Slang::ComPtr<ISlangBlob> diagBlob;
 
     textModule = textSession->loadModuleFromSourceString(
-        "text", 
-        "../data/assets/text.slang", 
-        (const char*)sourceData, 
-        diagBlob.writeRef());
+        "text", "../data/assets/text.slang", (const char*)sourceData, diagBlob.writeRef());
 
     SDL_free(sourceData);
 
@@ -444,41 +461,37 @@ bool create_text_pipeline(VulkanEngine* engine)
         return false;
     }
 
-    // Get SPIR-V
+    // Get SPIR-V and create shader module
     Slang::ComPtr<ISlangBlob> spirv;
     textModule->getTargetCode(0, spirv.writeRef());
 
-    // Create shader module
-    VkShaderModuleCreateInfo shaderCI = {
+    VkShaderModuleCreateInfo shaderCI{
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = spirv->getBufferSize(),
         .pCode = (const uint32_t*)spirv->getBufferPointer()
     };
 
-    if (vkCreateShaderModule(engine->device, &shaderCI, nullptr, &engine->textShaderModule) != VK_SUCCESS) {
-        SDL_Log("ERROR: Failed to create text shader module");
-        return false;
-    }
+    VK_CHECK(vkCreateShaderModule(engine->device, &shaderCI, nullptr, &engine->textShaderModule));
 
-    SDL_Log("Text shader loaded successfully");
+    SDL_Log("Text shader compiled successfully");
 
     // ===================================================================
     // 2. Pipeline Creation
     // ===================================================================
 
-    // Vertex input for TextVertex { float2 position; float2 uv; }
-    VkVertexInputBindingDescription bindingDesc = {
+    // Vertex Input for TextVertex { float2 position; float2 uv; }
+    VkVertexInputBindingDescription bindingDesc{
         .binding = 0,
         .stride = sizeof(TextVertex),
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
     };
 
-    VkVertexInputAttributeDescription attrDescs[2] = {
-        {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(TextVertex, position)},  // location 0
-        {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(TextVertex, uv)}         // location 1
+    VkVertexInputAttributeDescription attrDescs[2]{
+        { .location = 0, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(TextVertex, position) },
+        { .location = 1, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(TextVertex, uv) }
     };
 
-    VkPipelineVertexInputStateCreateInfo vertexInput = {
+    VkPipelineVertexInputStateCreateInfo vertexInput{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .vertexBindingDescriptionCount = 1,
         .pVertexBindingDescriptions = &bindingDesc,
@@ -486,33 +499,21 @@ bool create_text_pipeline(VulkanEngine* engine)
         .pVertexAttributeDescriptions = attrDescs
     };
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly = {
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-        .primitiveRestartEnable = VK_FALSE
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
     };
 
-    // Viewport and Scissor
-    VkViewport viewport = {
-        .x = 0.0f,
-        .y = 0.0f,
-        .width = (float)engine->windowExtent.width,
-        .height = (float)engine->windowExtent.height,
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f
+    // Dynamic viewport + scissor (matches your draw code)
+    VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+
+    VkPipelineDynamicStateCreateInfo dynamicState{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = ArraySize(dynamicStates),
+        .pDynamicStates = dynamicStates
     };
 
-    VkRect2D scissor = { .offset = {0, 0}, .extent = engine->windowExtent };
-
-    VkPipelineViewportStateCreateInfo viewportState = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        .viewportCount = 1,
-        .pViewports = &viewport,
-        .scissorCount = 1,
-        .pScissors = &scissor
-    };
-
-    VkPipelineRasterizationStateCreateInfo rasterizer = {
+    VkPipelineRasterizationStateCreateInfo rasterizer{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .polygonMode = VK_POLYGON_MODE_FILL,
         .cullMode = VK_CULL_MODE_NONE,
@@ -520,45 +521,45 @@ bool create_text_pipeline(VulkanEngine* engine)
         .lineWidth = 1.0f
     };
 
-    VkPipelineMultisampleStateCreateInfo multisampling = {
+    VkPipelineMultisampleStateCreateInfo multisampling{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
     };
 
-    VkPipelineDepthStencilStateCreateInfo depthStencil = {
+    VkPipelineDepthStencilStateCreateInfo depthStencil{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         .depthTestEnable = VK_FALSE,
         .depthWriteEnable = VK_FALSE
     };
 
-    // Alpha blending for text
-    VkPipelineColorBlendAttachmentState blendAttachment = {
-        .blendEnable         = VK_TRUE,
+    // Alpha blending
+    VkPipelineColorBlendAttachmentState blendAttachment{
+        .blendEnable = VK_TRUE,
         .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
         .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-        .colorBlendOp        = VK_BLEND_OP_ADD,
+        .colorBlendOp = VK_BLEND_OP_ADD,
         .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
         .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-        .alphaBlendOp        = VK_BLEND_OP_ADD,
-        .colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | 
-                               VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+        .alphaBlendOp = VK_BLEND_OP_ADD,
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
     };
 
-    VkPipelineColorBlendStateCreateInfo colorBlending = {
+    VkPipelineColorBlendStateCreateInfo colorBlending{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
         .attachmentCount = 1,
         .pAttachments = &blendAttachment
     };
 
-    // Push constant for color
-    VkPushConstantRange pushConstant = {
+    // Push constant
+    VkPushConstantRange pushConstant{
         .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset = 0,
         .size = sizeof(PushColor)
     };
 
-    // Pipeline layout
-    VkPipelineLayoutCreateInfo layoutCI = {
+    // Pipeline Layout
+    VkPipelineLayoutCreateInfo layoutCI{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
         .pSetLayouts = &engine->textDescriptorSetLayout,
@@ -568,8 +569,8 @@ bool create_text_pipeline(VulkanEngine* engine)
 
     VK_CHECK(vkCreatePipelineLayout(engine->device, &layoutCI, nullptr, &engine->textPipelineLayout));
 
-    // Dynamic rendering info
-    VkPipelineRenderingCreateInfo renderingCI = {
+    // Dynamic Rendering
+    VkPipelineRenderingCreateInfo renderingCI{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .colorAttachmentCount = 1,
         .pColorAttachmentFormats = &engine->swapchainImageFormat,
@@ -577,34 +578,25 @@ bool create_text_pipeline(VulkanEngine* engine)
     };
 
     // Shader stages
-    VkPipelineShaderStageCreateInfo stages[2] = {
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT,
-            .module = engine->textShaderModule,
-            .pName = "VSMain"
-        },
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .module = engine->textShaderModule,
-            .pName = "PSMain"
-        }
+    VkPipelineShaderStageCreateInfo stages[2]{
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,   .module = engine->textShaderModule, .pName = "VSMain" },
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = engine->textShaderModule, .pName = "PSMain" }
     };
 
-    // Final pipeline creation
-    VkGraphicsPipelineCreateInfo pipelineCI = {
+    // Final pipeline
+    VkGraphicsPipelineCreateInfo pipelineCI{
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .pNext = &renderingCI,
         .stageCount = 2,
         .pStages = stages,
         .pVertexInputState = &vertexInput,
         .pInputAssemblyState = &inputAssembly,
-        .pViewportState = &viewportState,
+        .pViewportState = nullptr,           // dynamic viewport/scissor
         .pRasterizationState = &rasterizer,
         .pMultisampleState = &multisampling,
         .pDepthStencilState = &depthStencil,
         .pColorBlendState = &colorBlending,
+        .pDynamicState = &dynamicState,
         .layout = engine->textPipelineLayout
     };
 

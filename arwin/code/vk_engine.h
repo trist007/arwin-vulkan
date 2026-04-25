@@ -11,7 +11,7 @@
 #include "slang/slang.h"
 #include "slang/slang-com-ptr.h"
 
-#define MAX_SWAPCHAIN_IMAGES 8
+#define MAX_SWAPCHAIN_IMAGES 4
 #define MAX_TEXTURES 3
 #define MAX_DEPTH_FORMATS 3
 
@@ -195,6 +195,7 @@ struct VulkanEngine
     VkDescriptorSet descriptorSetTex = VK_NULL_HANDLE;
 
     VkDescriptorSetLayout textDescriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool textDescriptorPool = VK_NULL_HANDLE;
     VkDescriptorSet       textDescriptorSet = VK_NULL_HANDLE;
 
     // model
@@ -262,7 +263,7 @@ void howtoCleanupVulkanEngine(VulkanEngine *engine);
 void drawHowtoVulkanEngine(VulkanEngine *engine, GameState *gameState);
 void runVulkanEngine(VulkanEngine *engine, GameState *gameState);
 FrameData *getCurrentFrame(VulkanEngine *engine);
-void DrawText(VulkanEngine *engine, VkCommandBuffer cmd, FontAtlas *atlas,
+void RenderText(VulkanEngine *engine, VkCommandBuffer cmd, FontAtlas *atlas,
 const char *text, float x, float y, float red = 1.0f, float green = 0.0f, float blue = 0.0f);
 
 // Textures

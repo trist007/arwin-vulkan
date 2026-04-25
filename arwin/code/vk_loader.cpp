@@ -339,7 +339,7 @@ load_gltf_model(Arena *arena, const char* path)
                     cgltf_accessor_read_uint(prim->indices, i*3+1, &b, 1);
                     cgltf_accessor_read_uint(prim->indices, i*3+2, &c, 1);
 
-                    model.mesh.tris[triOffset + i] = (Tri){
+                    model.mesh.tris[triOffset + i] = Tri{
                         (int)a + vertOffset,
                         (int)b + vertOffset,
                         (int)c + vertOffset
