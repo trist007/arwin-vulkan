@@ -18,7 +18,7 @@
             "label": "make",
             "type": "shell",
             "command": "time",
-            "args": ["/usr/bin/make", "-j"]
+            "args": ["/usr/bin/make", "-j"],
             "options": {
                 "cwd": "${workspaceFolder}/arwin/code"
             },
@@ -60,7 +60,7 @@
             "type": "shell",
             "command": "${workspaceFolder}/arwin/code/run.bat",
             "options": {
-                "cwd": "${workspaceFolder}"
+                "cwd": "${workspaceFolder}/arwin/bin"
             },
             "problemMatcher": []
         }

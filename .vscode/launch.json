@@ -6,12 +6,13 @@
             "name": "Debug (Windows - MSVC)",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/main.exe",
+            "program": "${workspaceFolder}/arwin/bin/main.exe",
             "args": [],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/build",
+            "cwd": "${workspaceFolder}/arwin/bin",
             "environment": [],
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "showDisplayString": true
         },
         {
             // New Linux configuration using GDB
