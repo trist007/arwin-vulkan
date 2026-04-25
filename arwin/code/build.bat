@@ -5,7 +5,7 @@ echo,
 
 REM capture start time
 set START_TIME=%time%
-set START_TIME=%START_TIME: =%
+set START_TIME=%START_TIME: =0%
 
 REM increment build counter
 set COUNTER_FILE=build_count.txt
@@ -79,7 +79,7 @@ popd
 
 REM capture end time and calculate the difference
 set END_TIME=%time%
-set END_TIME=%END_TIME: =0%   REM replace spaces with zeros (for single-digit hours)
+set END_TIME=%END_TIME: =0%
 
 REM Remove any leading zeros safely for calculation
 set START_H=%START_TIME:~0,2%
