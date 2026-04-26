@@ -100,6 +100,7 @@ struct FrameData
     ShaderDataBuffer shaderDataBuffers; // GPU buffer
     ShaderData shaderData;              // CPU data
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 };
 
 struct ComputePushConstants
@@ -234,7 +235,10 @@ struct VulkanEngine
     GameFont font;
     int pixelHeight = 24;
     VkBuffer  stagingBuffer = VK_NULL_HANDLE;
+    VkBuffer  textStagingBuffer = VK_NULL_HANDLE;
     VmaAllocation stagingAlloc = VK_NULL_HANDLE;
+    VmaAllocation textStagingAlloc = VK_NULL_HANDLE;
+    
 
     // memory arena
     Arena *arena;

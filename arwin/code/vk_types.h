@@ -19,7 +19,7 @@
 #define CLAMP(v, low, high) ((v) < (low) ? (low) : (v) > (high) ? (high) : (v))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 
-#define MAX_BINDINGS 4
+#define MAX_BINDINGS 24
 #define MAX_ATTRIBUTES 16
 
 

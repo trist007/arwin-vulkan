@@ -1,4 +1,46 @@
 ===============================================================
+Things to Do
+===============================================================
+
+1. Critical Bugs
+
+In init_swapchain() – Duplicate deletion lambda
+You push the same deletion function twice (drawImage + depthImage). The second one duplicates the drawImage destroy.
+→ Leads to double-delete → crash on shutdown.
+
+In RenderText()
+You create a staging buffer every frame for text and never destroy it (commented out).
+This leaks memory badly.Fix for text (recommended pattern):c
+
+// At top of mainRenderLoop or begin_frame
+if (engine->stagingBuffer != VK_NULL_HANDLE) {
+    vmaDestroyBuffer(engine->allocator, engine->stagingBuffer, engine->stagingAlloc);
+    engine->stagingBuffer = VK_NULL_HANDLE;
+}
+
+// ... in RenderText after vkCmdDraw ...
+// Do NOT destroy here. Let the frame cleanup handle it.
+engine->stagingBuffer = stagingBuffer;
+engine->stagingAlloc  = stagingAlloc;
+
+2. Important IssuesDescriptor pool too small in create_main_3d_descriptor_layout_and_set() — maxSets = 1 is dangerous.
+You’re using only one descriptor set for everything. This will bite you when you add more.
+update_shader_data() always writes to frames[0] in the descriptor write — should be per-frame.
+resize_swapchain() calls destroy_image manually but you have create_image() helper — inconsistency.
+Many places still use raw VK_CHECK without good error messages.
+constexpr bool bUseValidationLayers → make it runtime configurable.
+
+3. Minor / Style IssuesLots of magic numbers (FRAME_OVERLAP, MAX_SWAPCHAIN_IMAGES, etc.) — define them clearly.
+Some functions take GameState* but don’t always need it.
+destroyVulkanEngine is called howtoCleanupVulkanEngine — rename.
+You’re mixing SDL_Log and fprintf — pick one.
+
+Quick Wins (do these today)Fix the double deletion in init_swapchain().
+Move staging buffer destruction to begin_frame().
+Increase descriptor pool maxSets to at least FRAME_OVERLAP * 4.
+Make descriptor writes per-frame (don’t hardcode frames[0]).
+
+===============================================================
 Bonus Improvements
 ===============================================================
 
@@ -172,6 +214,11 @@ DrawModel(engine, cmd, &gameState->enemy);
 Extra Tips for Multiple ModelsYou can pass a model matrix per model if you want them at different positions/scales.
 For animated models, you’ll need to update skinning matrices per model.
 For performance with many models, you can combine static ones into one big buffer later.
+
+===============================================================
+TODO
+===============================================================
+finish porting vk_initializers, vk_images, and vk_pipelines
 
 ===============================================================
 howto in detail

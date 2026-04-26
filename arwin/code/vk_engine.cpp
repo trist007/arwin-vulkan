@@ -281,10 +281,6 @@ void init_swapchain(VulkanEngine *engine) {
     vkDestroyImageView(engine->device, engine->drawImage.imageView, nullptr);
     vmaDestroyImage(engine->allocator, engine->drawImage.image,
                     engine->drawImage.allocation);
-
-    vkDestroyImageView(engine->device, engine->depthImage.imageView, nullptr);
-    vmaDestroyImage(engine->allocator, engine->depthImage.image,
-                    engine->depthImage.allocation);
   });
 }
 
@@ -568,7 +564,6 @@ void runVulkanEngine(VulkanEngine *engine, GameState *gameState) {
     // make imgui calculate internal draw structures
     //ImGui::Render();
 
-    //drawVulkanEngine(engine);
     mainRenderLoop(engine, gameState);
   }
 }
@@ -828,11 +823,11 @@ void RenderText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
     while (text[len]) ++len;
     if (len == 0) return;
 
-    float cursorX = floor(screenX);
-    float cursorY = floor(screenY);
-
     TextVertex* verts = (TextVertex*)alloca(len * 6 * sizeof(TextVertex));
     int vertCount = 0;
+
+    float cursorX = floor(screenX);
+    float cursorY = floor(screenY);
 
     for (int i = 0; i < len; ++i)
     {
@@ -882,19 +877,20 @@ void RenderText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
 
     if (vertCount == 0) return;
 
+    // ====================== PUSH CONSTANTS (Color) ======================
+    // Keep this — each text call can have different color
     struct PushColor push = { red, green, blue, 1.0f };
-
-    vkCmdPushConstants(cmd, engine->textPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
+    vkCmdPushConstants(cmd, engine->textPipelineLayout, 
+                       VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(push), &push);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, engine->textPipelineLayout,
-                            0, 1, &engine->textDescriptorSet, 0, nullptr);
-
     // ====================== CREATE STAGING BUFFER ======================
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAlloc;
+
     VkBufferCreateInfo stagingCI = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = vertCount * sizeof(TextVertex),
+        .size = (VkDeviceSize)(vertCount * sizeof(TextVertex)),
         .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT   // ← add VERTEX_BUFFER_BIT
     };
 
@@ -904,19 +900,28 @@ void RenderText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
     };
 
     VK_CHECK(vmaCreateBuffer(engine->allocator, &stagingCI, &stagingAllocCI,
-                             &engine->stagingBuffer, &engine->stagingAlloc, nullptr));
+                             &stagingBuffer, &stagingAlloc, nullptr));
 
     void* mapped;
-    vmaMapMemory(engine->allocator, engine->stagingAlloc, &mapped);
+    vmaMapMemory(engine->allocator, stagingAlloc, &mapped);
     memcpy(mapped, verts, vertCount * sizeof(TextVertex));
-    vmaUnmapMemory(engine->allocator, engine->stagingAlloc);
+    vmaUnmapMemory(engine->allocator, stagingAlloc);
 
     // ====================== BIND VERTEX BUFFER ======================
     VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &engine->stagingBuffer, &offset);   // ← THIS WAS MISSING!
+    vkCmdBindVertexBuffers(cmd, 0, 1, &stagingBuffer, &offset);
 
     // Draw all characters at once (very efficient)
     vkCmdDraw(cmd, vertCount, 1, 0, 0);
+
+    // Store for destruction next frame
+    if (engine->textStagingBuffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(engine->allocator, engine->textStagingBuffer, engine->textStagingAlloc);
+    }
+
+    // === Store it so begin_frame() can destroy it next frame ===
+    engine->stagingBuffer = stagingBuffer;
+    engine->stagingAlloc  = stagingAlloc;
 
     // ====================== DESTROY AFTER RECORDING ======================
     // Move this destruction OUT of DrawText, just like you did for the red quad.
@@ -1066,44 +1071,52 @@ create_main_3d_descriptor_layout_and_set(VulkanEngine *engine)
     VkDescriptorPoolSize poolSizes[1] = {};
 
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = FRAME_OVERLAP * 2;   // one per frame is safe
+    poolSizes[0].descriptorCount = FRAME_OVERLAP * 2;
 
     VkDescriptorPoolCreateInfo descPoolCI{
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .maxSets = 1,
+        .flags = 0,
+        .maxSets = FRAME_OVERLAP * 4,
         .poolSizeCount = 1,
         .pPoolSizes = poolSizes
     };
 
     VK_CHECK(vkCreateDescriptorPool(engine->device, &descPoolCI, nullptr, &engine->descriptorPool));
 
-    // === Allocate Descriptor Set ===
-    VkDescriptorSetAllocateInfo texDescSetAlloc{
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool = engine->descriptorPool,
-        .descriptorSetCount = 1,
-        .pSetLayouts = &engine->descriptorSetLayoutTex
-    };
 
-    VK_CHECK(vkAllocateDescriptorSets(engine->device, &texDescSetAlloc, &engine->descriptorSetTex));
+    for(uint32_t i = 0; i < FRAME_OVERLAP; i++)
+    {
+        // === Allocate Descriptor Set ===
+        VkDescriptorSetAllocateInfo texDescSetAlloc{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = engine->descriptorPool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &engine->descriptorSetLayoutTex
+        };
 
-    // New write for shaderData (binding 0)
-    VkDescriptorBufferInfo shaderDataBufferInfo{
-        .buffer = engine->frames[0].shaderDataBuffers.buffer,   // use one from current frame
-        .offset = 0,
-        .range = sizeof(ShaderData)
-    };
+        VK_CHECK(vkAllocateDescriptorSets(engine->device, &texDescSetAlloc, &engine->frames[i].descriptorSet));
+    }
 
-    VkWriteDescriptorSet writeShaderData{
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = engine->descriptorSetTex,
-        .dstBinding = 0,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .pBufferInfo = &shaderDataBufferInfo
-    };
+    for(uint32_t i = 0; i < FRAME_OVERLAP; i++)
+    {
+        // New write for shaderData (binding 0)
+        VkDescriptorBufferInfo shaderDataBufferInfo{
+            .buffer = engine->frames[i].shaderDataBuffers.buffer,   // use one from current frame
+            .offset = 0,
+            .range = sizeof(ShaderData)
+        };
 
-    vkUpdateDescriptorSets(engine->device, 1, &writeShaderData, 0, nullptr);
+        VkWriteDescriptorSet writeShaderData{
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = engine->frames[i].descriptorSet,
+            .dstBinding = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .pBufferInfo = &shaderDataBufferInfo
+        };
+
+        vkUpdateDescriptorSets(engine->device, 1, &writeShaderData, 0, nullptr);
+    }
 
     // Loading shaders
     //Slang::ComPtr<slang::IGlobalSession> globalSession;
@@ -1537,6 +1550,8 @@ begin_frame(VulkanEngine *engine)
 void
 begin_rendering(VulkanEngine *engine, VkCommandBuffer cmd)
 {
+    FrameData &currentFrame = engine->frames[engine->frameIndex];
+
     // === 1. Pipeline Barriers (Swapchain + Depth Image) ===
     VkImageMemoryBarrier2 outputBarriers[2] = {
         // Swapchain image barrier
@@ -1640,7 +1655,7 @@ begin_rendering(VulkanEngine *engine, VkCommandBuffer cmd)
                             engine->pipelineLayout,
                             0,                      // first set
                             1,                      // set count
-                            &engine->descriptorSetTex,
+                            &currentFrame.descriptorSet,
                             0, nullptr);
 }
 
