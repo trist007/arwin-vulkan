@@ -26,6 +26,46 @@ d.pop_back();     // remove from back
 d.pop_front();    // remove from front
 */
 
+// ====================== DELETION QUEUE ======================
+
+#define DELETION_QUEUE_INITIAL_CAPACITY 64
+
+typedef void (*DeletionFunc)(void* userdata);
+
+struct DeletionEntry
+{
+    DeletionFunc func;
+    void*        userdata;
+};
+
+struct DeletionQueue
+{
+    DeletionEntry* entries;
+    uint32_t count;
+    uint32_t capacity;
+};
+
+// For image + view + allocation
+struct ImageDeletion
+{
+    VkDevice device;
+    VkImageView view;
+    VmaAllocator allocator;
+    VkImage image;
+    VmaAllocation allocation;
+};
+
+struct AllocatedImageDeletion
+{
+    VkDevice       device;
+    VkImageView    imageView;
+    VmaAllocator   allocator;
+    VkImage        image;
+    VmaAllocation  allocation;
+};
+
+
+/*
 // this is a poor performance way of doing callbacks as it is inefficient at scale storing
 // whole std::functions for every object, but will suffice for our exercise
 // ! NOTE: trist007: if you need to delete thousands of objects a better impl
@@ -52,6 +92,7 @@ struct DeletionQueue
         deletors.clear();
     }
 };
+*/
 
 struct GPUSceneData
 {
@@ -160,7 +201,6 @@ struct VulkanEngine
     // queues
     VkQueue graphicsQueue;
     uint32_t graphicsQueueFamily;
-    DeletionQueue deletionQueue;
     DeletionQueue mainDeletionQueue;
 
     // VMA
@@ -288,3 +328,12 @@ const char *text, float x, float y, float red = 1.0f, float green = 0.0f, float 
 AllocatedImage create_image(VulkanEngine *engine, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 AllocatedImage create_image(VulkanEngine *engine, void *data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 void destroy_image(VulkanEngine *engine, const AllocatedImage &img);
+
+// DeletionQueue
+void deletion_queue_init(DeletionQueue *queue);
+void deletion_queue_push(DeletionQueue *queue, DeletionFunc func, void* userdata);
+void deletion_queue_flush(DeletionQueue *queue);
+void deletion_queue_destroy(DeletionQueue *queue);
+void destroy_allocated_image(void* userdata);
+void deletion_queue_push_allocated_image(DeletionQueue *queue, VkDevice device, VkImageView view, VmaAllocator allocator, VkImage image, VmaAllocation allocation);
+

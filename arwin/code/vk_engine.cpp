@@ -58,6 +58,7 @@ void initVulkanEngine(VulkanEngine *engine, GameState *gameState)
     // everything went fine
     engine->isInitialized = true;
 
+    // Set camera parameters
     engine->mainCamera.velocity = {0.0f, 0.0f, 0.0f};
     engine->mainCamera.position = {0.0f, 0.0f, 5.0f};
 
@@ -82,8 +83,6 @@ void init_vulkan(VulkanEngine *engine) {
     uint32_t instanceExtensionsCount{0};
     const char *const *newinstanceExtensions{
         SDL_Vulkan_GetInstanceExtensions(&instanceExtensionsCount)};
-    // char const* const* newinstanceExtensions{
-    // SDL_Vulkan_GetInstanceExtensions(&instanceExtensionsCount) };
 
     uint32_t enabledLayerCount = 0;
     const char *enabledLayers[1] = {"VK_LAYER_KHRONOS_validation"};
@@ -199,12 +198,20 @@ void init_vulkan(VulkanEngine *engine) {
     allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
     vmaCreateAllocator(&allocatorInfo, &engine->allocator);
 
+    deletion_queue_init(&engine->mainDeletionQueue);
+
+    deletion_queue_push(&engine->mainDeletionQueue, 
+                    (DeletionFunc)vmaDestroyAllocator, 
+                    engine->allocator);   // userdata = allocator
+
     // ! NOTE: trist007: [&]() is the lambda [&] is capture by reference which for
     // a deletion queue ! can be dangerous if the variable goes out of scope
     // before flush() is called [=] capture by ! value is safter because it copies
     // the handle by value at push time
+    /*
     engine->mainDeletionQueue.push_function(
         [=]() { vmaDestroyAllocator(engine->allocator); });
+    */
 }
 
 void init_swapchain(VulkanEngine *engine) {
@@ -250,11 +257,12 @@ void init_swapchain(VulkanEngine *engine) {
   VK_CHECK(vkCreateImageView(engine->device, &rview_info, nullptr,
                              &engine->drawImage.imageView));
 
-  engine->mainDeletionQueue.push_function([=]() {
-    vkDestroyImageView(engine->device, engine->drawImage.imageView, nullptr);
-    vmaDestroyImage(engine->allocator, engine->drawImage.image,
-                    engine->drawImage.allocation);
-  });
+  deletion_queue_push_allocated_image(&engine->mainDeletionQueue,
+                                engine->device,
+                                engine->drawImage.imageView,
+                                engine->allocator,
+                                engine->drawImage.image,
+                                engine->drawImage.allocation);
 
   engine->depthImage.imageFormat = VK_FORMAT_D32_SFLOAT;
   engine->depthImage.imageExtent = drawImageExtent;
@@ -277,11 +285,13 @@ void init_swapchain(VulkanEngine *engine) {
   VK_CHECK(vkCreateImageView(engine->device, &dview_info, nullptr,
                              &engine->depthImage.imageView));
 
-  engine->mainDeletionQueue.push_function([=]() {
-    vkDestroyImageView(engine->device, engine->drawImage.imageView, nullptr);
-    vmaDestroyImage(engine->allocator, engine->drawImage.image,
-                    engine->drawImage.allocation);
-  });
+  deletion_queue_push_allocated_image(&engine->mainDeletionQueue,
+                                engine->device,
+                                engine->drawImage.imageView,
+                                engine->allocator,
+                                engine->drawImage.image,
+                                engine->drawImage.allocation);
+
 }
 
 void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height)
@@ -2058,4 +2068,82 @@ submit_and_present(VulkanEngine *engine)
         // Optional: log error, but don't crash in release
         SDL_Log("vkQueuePresentKHR failed: %d", presentResult);
     }
+}
+
+void
+deletion_queue_init(DeletionQueue* queue)
+{
+    queue->count = 0;
+    queue->capacity = DELETION_QUEUE_INITIAL_CAPACITY;
+    queue->entries = (DeletionEntry*)malloc(sizeof(DeletionEntry) * queue->capacity);
+}
+
+void
+deletion_queue_push(DeletionQueue* queue, DeletionFunc func, void* userdata)
+{
+    if (queue->count >= queue->capacity)
+    {
+        // Grow the queue
+        queue->capacity *= 2;
+        queue->entries = (DeletionEntry*)realloc(queue->entries, 
+                                                 sizeof(DeletionEntry) * queue->capacity);
+    }
+
+    queue->entries[queue->count].func = func;
+    queue->entries[queue->count].userdata = userdata;
+    queue->count++;
+}
+
+void
+deletion_queue_flush(DeletionQueue* queue)
+{
+    // Destroy in reverse order (LIFO) - most recent first
+    for (int i = (int)queue->count - 1; i >= 0; --i)
+    {
+        queue->entries[i].func(queue->entries[i].userdata);
+    }
+
+    queue->count = 0;
+}
+
+void
+deletion_queue_destroy(DeletionQueue* queue)
+{
+    if (queue->entries)
+    {
+        free(queue->entries);
+        queue->entries = NULL;
+    }
+    queue->count = 0;
+    queue->capacity = 0;
+}
+
+void destroy_allocated_image(void* userdata)
+{
+    ImageDeletion* d = (ImageDeletion*)userdata;
+    if (d->view) vkDestroyImageView(d->device, d->view, NULL);
+    if (d->image) vmaDestroyImage(d->allocator, d->image, d->allocation);
+    free(d);   // important: free the struct we allocated
+}
+
+void deletion_queue_push_allocated_image(DeletionQueue *queue,
+                                         VkDevice device,
+                                         VkImageView view,
+                                         VmaAllocator allocator,
+                                         VkImage image,
+                                         VmaAllocation allocation)
+{
+    if (image == VK_NULL_HANDLE)
+        return;
+
+    AllocatedImageDeletion* del = (AllocatedImageDeletion*)malloc(sizeof(AllocatedImageDeletion));
+    *del = AllocatedImageDeletion{
+        .device     = device,
+        .imageView  = view,
+        .allocator  = allocator,
+        .image      = image,
+        .allocation = allocation
+    };
+
+    deletion_queue_push(queue, destroy_allocated_image, del);
 }
