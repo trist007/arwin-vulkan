@@ -6,8 +6,9 @@
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan_core.h>
 
-#define VMA_IMPLEMENTATION
+//#define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
+
 #include "vk_pipelines.h"
 
 //#include "ktxvulkan.h"
@@ -16,9 +17,9 @@
 
 #include "initVulkan.h"
 
-#define TINYOBJLOADER_DISABLE_FAST_FLOAT
-#define TINYOBJLOADER_IMPLEMENTATION
-#include "tiny_obj_loader.h"
+//#define TINYOBJLOADER_DISABLE_FAST_FLOAT
+//#define TINYOBJLOADER_IMPLEMENTATION
+//#include "tiny_obj_loader.h"
 
 #include "vk_loader.h"
 
@@ -528,9 +529,13 @@ void howtoCleanupVulkanEngine(VulkanEngine *engine)
         SDL_DestroyWindow(engine->window);
 
     SDL_Quit();
+
+    if (&engine->mainDeletionQueue)
+        deletion_queue_destroy(&engine->mainDeletionQueue);
+
 }
 
-void runVulkanEngine(VulkanEngine *engine, GameState *gameState) {
+void runVulkanEngine(VulkanEngine *engine, GameState *gamestate) {
   SDL_Event e;
   bool bQuit = false;
 
@@ -552,7 +557,7 @@ void runVulkanEngine(VulkanEngine *engine, GameState *gameState) {
         engine->stop_rendering = false;
 
       // send SDL event to camera and imgui for handling
-      engine->mainCamera.processSDLEvent(e);
+      engine->mainCamera.processSDLEvent(e, gamestate);
       //ImGui_ImplSDL3_ProcessEvent(&e);
     }
 

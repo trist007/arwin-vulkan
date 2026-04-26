@@ -1,6 +1,6 @@
 #include "vk_engine.h"
 
-int main(int argc,  char *argv[])
+int arwin(int argc,  char *argv[])
 {
     // Game Storage
     static uint8_t gameStorage[16 * 1024 * 1024];
@@ -17,7 +17,7 @@ int main(int argc,  char *argv[])
     gameState.arena = &gameArena;
 
     // initializes everything to 0
-    VulkanEngine engine = {};
+    struct VulkanEngine engine = {};
 
     engine.arena = &engineArena;
 

@@ -1,7 +1,7 @@
 #include "initVulkan.h"
 
 uint32_t
-enableExtCount(DeviceInformation *deviceInfo)
+enableExtCount(struct DeviceInformation *deviceInfo)
 {
     if(!deviceInfo) return 0;
 
@@ -30,7 +30,7 @@ getDeviceCount(VkInstance instance, VkSurfaceKHR surface)
 
     uint32_t deviceCount = 0;
 
-    result = vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+    result = vkEnumeratePhysicalDevices(instance, &deviceCount, NULL);
     if(result != VK_SUCCESS)
     {
         SDL_Log("Error: vkEnumeratePhysicalDevices failed");
@@ -49,23 +49,25 @@ bool createLogicalDevice(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIn
 
     float queuePriority = 1.0f;
 
-    VkPhysicalDeviceVulkan12Features enabledVk12Features{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-        .descriptorIndexing = true,
-        .shaderSampledImageArrayNonUniformIndexing = true,
-        .descriptorBindingVariableDescriptorCount = true,
-        .runtimeDescriptorArray = true,
-        .bufferDeviceAddress = true
-    };
-    VkPhysicalDeviceVulkan13Features enabledVk13Features{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-        .pNext = &enabledVk12Features,
-        .synchronization2 = true,
-        .dynamicRendering = true,
-    };
-    VkPhysicalDeviceFeatures enabledVk10Features{
-        .samplerAnisotropy = VK_TRUE
-    };
+    VkPhysicalDeviceVulkan12Features enabledVk12Features = {0};
+    
+    enabledVk12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    enabledVk12Features.descriptorIndexing = true;
+    enabledVk12Features.shaderSampledImageArrayNonUniformIndexing = true;
+    enabledVk12Features.descriptorBindingVariableDescriptorCount = true;
+    enabledVk12Features.runtimeDescriptorArray = true;
+    enabledVk12Features.bufferDeviceAddress = true;
+
+    VkPhysicalDeviceVulkan13Features enabledVk13Features = {0};
+
+    enabledVk13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    enabledVk13Features.pNext = &enabledVk12Features;
+    enabledVk13Features.synchronization2 = true;
+    enabledVk13Features.dynamicRendering = true;
+
+    VkPhysicalDeviceFeatures enabledVk10Features = {0};
+
+    enabledVk10Features.samplerAnisotropy = VK_TRUE;
 
     const char* extensions[1] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
@@ -149,7 +151,7 @@ bool createLogicalDevice(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIn
         */
     
 
-    VkResult result = vkCreateDevice(physicalDevice, &createInfo, nullptr, outDevice);
+    VkResult result = vkCreateDevice(physicalDevice, &createInfo, NULL, outDevice);
 
     if (result != VK_SUCCESS) {
         SDL_Log("Failed to create logical device: %d\n", result);
@@ -164,7 +166,7 @@ bool mincreateLogicalDevice(VkPhysicalDevice physicalDevice,
                          uint32_t queueFamilyIndex,
                          VkDevice* outDevice,
                          uint32_t numExt,              // ignored for now
-                         DeviceInformation *deviceInfo)
+                         struct DeviceInformation *deviceInfo)
 {
     if (physicalDevice == VK_NULL_HANDLE || 
         queueFamilyIndex == UINT32_MAX || 
@@ -222,7 +224,7 @@ getVulkanInstanceVersion()
 }
 
 int
-evalDevice(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevice device, DeviceInformation *deviceInfo)
+evalDevice(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevice device, struct DeviceInformation *deviceInfo)
 {
     if(instance == VK_NULL_HANDLE)
     {
@@ -253,7 +255,7 @@ evalDevice(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevice device, D
             VK_VERSION_MINOR(properties.apiVersion),
             VK_VERSION_PATCH(properties.apiVersion));
 
-    if (device != nullptr)
+    if (device != NULL)
     {
         //strncpy(deviceInfo->name, deviceName, sizeof(deviceName) - 1);
         //deviceInfo->name[sizeof(deviceInfo->name) - 1] = '\0';   // Guarantee null-termination
@@ -267,7 +269,7 @@ evalDevice(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevice device, D
     uint32_t queueFamilyCount = 0;
 
     // First call: Get the count
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, NULL);
 
     if (queueFamilyCount == 0) {
         SDL_Log("Device has no queue families!\n");
@@ -307,14 +309,14 @@ evalDevice(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevice device, D
         }
     }
 
-    u32 extensionCount = 0;
+    uint32_t extensionCount = 0;
     VkExtensionProperties extensionArray[MAX_PHYSICAL_DEVICE_EXTENSIONS];
 
-    vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+    vkEnumerateDeviceExtensionProperties(device, NULL, &extensionCount, NULL);
 
     if (extensionCount > MAX_PHYSICAL_DEVICE_EXTENSIONS) extensionCount = MAX_PHYSICAL_DEVICE_EXTENSIONS;
 
-    result = vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, extensionArray);
+    result = vkEnumerateDeviceExtensionProperties(device, NULL, &extensionCount, extensionArray);
 
     if(result == VK_SUCCESS || result == VK_INCOMPLETE)
     {

@@ -12,7 +12,7 @@
     descriptor_layout_builder_clear(&builder);  // ready for next layout
 */
 
-void DescriptorLayoutBuilder::add_binding(DescriptorLayoutBuilder *builder,
+void descriptorLayoutBuilder_add_binding(struct DescriptorLayoutBuilder *builder,
     uint32_t binding, VkDescriptorType type, uint32_t descriptorCount, VkShaderStageFlags stageFlags)
 {
     if(builder->bindingCount >= DESCRIPTOR_LAYOUT_MAX_BINDINGS)
@@ -29,17 +29,17 @@ void DescriptorLayoutBuilder::add_binding(DescriptorLayoutBuilder *builder,
     b->pImmutableSamplers = nullptr;
 }
 
-void DescriptorLayoutBuilder::add(DescriptorLayoutBuilder* builder, uint32_t binding, VkDescriptorType type)
+void descriptorLayoutBuilder_add(struct DescriptorLayoutBuilder* builder, uint32_t binding, VkDescriptorType type)
 {
-    DescriptorLayoutBuilder::add_binding(builder, binding, type, 1, VK_SHADER_STAGE_ALL);
+    descriptorLayoutBuilder_add_binding(builder, binding, type, 1, VK_SHADER_STAGE_ALL);
 }
 
-void DescriptorLayoutBuilder::clear(DescriptorLayoutBuilder *builder)
+void descriptorLayoutBuilder_clear(struct DescriptorLayoutBuilder *builder)
 {
     builder->bindingCount = 0;
 }
 
-VkDescriptorSetLayout DescriptorLayoutBuilder::build(DescriptorLayoutBuilder* builder, VkDevice device, VkShaderStageFlags defaultStages,
+VkDescriptorSetLayout DescriptorLayoutBuilder::build(struct DescriptorLayoutBuilder* builder, VkDevice device, VkShaderStageFlags defaultStages,
         void* pNext, VkDescriptorSetLayoutCreateFlags flags)
 {
     // Apply default stage flags if none were set
@@ -147,7 +147,7 @@ VkDescriptorSet DescriptorAllocator::allocate(VkDevice device, VkDescriptorSetLa
     descriptor_allocator_growable_destroy(&allocator, device);      // full cleanup at shutdown
 */
 
-VkDescriptorPool DescriptorAllocatorGrowable::get_pool(DescriptorAllocatorGrowable *alloc, VkDevice device)
+VkDescriptorPool descriptorAllocatorGrowable_get_pool(struct DescriptorAllocatorGrowable *alloc, VkDevice device)
 {
     // If we have a ready pool, return it
     if (alloc->readyPoolCount > 0)
@@ -156,7 +156,7 @@ VkDescriptorPool DescriptorAllocatorGrowable::get_pool(DescriptorAllocatorGrowab
     }
 
     // No ready pools → create a new one
-    VkDescriptorPool newPool = DescriptorAllocatorGrowable::create_pool(device,
+    VkDescriptorPool newPool = descriptorAllocatorGrowable_create_pool(device,
                                                                          alloc->setsPerPool,
                                                                          alloc->ratios,
                                                                          alloc->ratioCount);
@@ -180,7 +180,7 @@ VkDescriptorPool DescriptorAllocatorGrowable::get_pool(DescriptorAllocatorGrowab
     return newPool;
 }
 
-VkDescriptorPool DescriptorAllocatorGrowable::create_pool(VkDevice device, uint32_t setCount, PoolSizeRatio *poolRatios, uint32_t ratioCount)
+VkDescriptorPool descriptorAllocatorGrowable_create_pool(VkDevice device, uint32_t setCount, PoolSizeRatio *poolRatios, uint32_t ratioCount)
 {
     VkDescriptorPoolSize poolSizes[DESCRIPTOR_ALLOCATOR_MAX_RATIOS];
 
@@ -215,7 +215,7 @@ VkDescriptorPool DescriptorAllocatorGrowable::create_pool(VkDevice device, uint3
     return pool;
 }
 
-void DescriptorAllocatorGrowable::init_pool(DescriptorAllocatorGrowable *alloc, VkDevice device,
+void descriptorAllocatorGrowable_init_pool(struct DescriptorAllocatorGrowable *alloc, VkDevice device,
     uint32_t initialSets, PoolSizeRatio* poolRatios, uint32_t ratioCount)
 {
     memset(alloc, 0, sizeof(*alloc));
@@ -226,7 +226,7 @@ void DescriptorAllocatorGrowable::init_pool(DescriptorAllocatorGrowable *alloc, 
     alloc->ratioCount = copyCount;
 
     // Create first pool
-    VkDescriptorPool firstPool = DescriptorAllocatorGrowable::create_pool(device, initialSets, poolRatios, ratioCount);
+    VkDescriptorPool firstPool = descriptorAllocatorGrowable_create_pool(device, initialSets, poolRatios, ratioCount);
     if (firstPool != VK_NULL_HANDLE)
     {
         alloc->readyPools[0] = firstPool;
@@ -234,14 +234,14 @@ void DescriptorAllocatorGrowable::init_pool(DescriptorAllocatorGrowable *alloc, 
     }
 }
 
-void DescriptorAllocatorGrowable::clear_pools(DescriptorAllocatorGrowable *alloc, VkDevice device)
+void descriptorAllocatorGrowable_clear_pools(struct DescriptorAllocatorGrowable *alloc, VkDevice device)
 { 
     // reset counters, move all pools back to ready, etc.
     alloc->fullPoolCount = 0;
     // ready pools stay ready
 }
 
-void DescriptorAllocatorGrowable::destroy_pools(DescriptorAllocatorGrowable *alloc, VkDevice device)
+void descriptorAllocatorGrowable_destroy_pools(struct DescriptorAllocatorGrowable *alloc, VkDevice device)
 {
     if (device == VK_NULL_HANDLE || alloc == NULL)
         return;
@@ -276,7 +276,7 @@ void DescriptorAllocatorGrowable::destroy_pools(DescriptorAllocatorGrowable *all
     // memset(alloc, 0, sizeof(DescriptorAllocatorGrowable));
 }
 
-VkDescriptorSet DescriptorAllocatorGrowable::allocate(DescriptorAllocatorGrowable *alloc, VkDevice device,
+VkDescriptorSet descriptorAllocatorGrowable_allocate(struct DescriptorAllocatorGrowable *alloc, VkDevice device,
 VkDescriptorSetLayout layout, void* pNext)
 {
     // Try ready pools first
@@ -297,7 +297,7 @@ VkDescriptorSetLayout layout, void* pNext)
     }
 
     // All current pools are full → create new one
-    VkDescriptorPool newPool = DescriptorAllocatorGrowable::create_pool(device,
+    VkDescriptorPool newPool = descriptorAllocatorGrowable_create_pool(device,
                                                                          alloc->setsPerPool,
                                                                          alloc->ratios,
                                                                          alloc->ratioCount);
@@ -313,7 +313,7 @@ VkDescriptorSetLayout layout, void* pNext)
     alloc->readyPools[alloc->readyPoolCount++] = newPool;
 
     // Try allocate again from the new pool
-    return DescriptorAllocatorGrowable::allocate(alloc, device, layout, pNext);
+    return descriptorAllocatorGrowable_allocate(alloc, device, layout, pNext);
 }
 
 // ! NOTE: trist007: VkDescriptorTypes
@@ -355,7 +355,7 @@ VkDescriptorSetLayout layout, void* pNext)
     descriptor_writer_clear(&writer);   // ready for next frame / next batch
 
 */
-void DescriptorWriter::write_buffer(DescriptorWriter* writer,
+void descriptorWriter_write_buffer(struct DescriptorWriter* writer,
                                     uint32_t binding,
                                     VkBuffer buffer,
                                     VkDeviceSize size,
@@ -381,7 +381,7 @@ void DescriptorWriter::write_buffer(DescriptorWriter* writer,
     w->pTexelBufferView = NULL;
 }
 
-void DescriptorWriter::write_image(DescriptorWriter* writer,
+void descriptorWriter_write_image(struct DescriptorWriter* writer,
                                    uint32_t binding,
                                    VkImageView imageView,
                                    VkSampler sampler,
@@ -408,14 +408,14 @@ void DescriptorWriter::write_image(DescriptorWriter* writer,
 }
 
 
-void DescriptorWriter::clear(DescriptorWriter* writer)
+void descriptorWriter_clear(struct DescriptorWriter* writer)
 {
     writer->imageInfoCount = 0;
     writer->bufferInfoCount = 0;
     writer->writeCount = 0;
 }
 
-void DescriptorWriter::update_set(DescriptorWriter* writer,
+void descriptorWriter_update_set(struct DescriptorWriter* writer,
                                   VkDevice device,
                                   VkDescriptorSet set)
 {
@@ -427,5 +427,5 @@ void DescriptorWriter::update_set(DescriptorWriter* writer,
     if (writer->writeCount > 0)
         vkUpdateDescriptorSets(device, writer->writeCount, writer->writes, 0, NULL);
 
-    DescriptorWriter::clear(writer);
+    descriptorWriter_clear(writer);
 }

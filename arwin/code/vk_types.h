@@ -38,63 +38,64 @@
         }                                                               \
     } while (0)
 
-struct AllocatedImage
+typedef struct AllocatedImage
 {
-    VkImage image = VK_NULL_HANDLE;
-    VkImageView imageView = VK_NULL_HANDLE;
-    VmaAllocation allocation = VK_NULL_HANDLE;
+    VkImage image;
+    VkImageView imageView ;
+    VmaAllocation allocation;
 
-    VkExtent3D imageExtent = {0, 0, 0};
-    VkFormat imageFormat = VK_FORMAT_UNDEFINED;
-};
+    VkExtent3D imageExtent;
+    VkFormat imageFormat;
+} AllocatedImage;
 
-struct AllocatedBuffer
+typedef struct AllocatedBuffer
 {
     VkBuffer buffer;
     VmaAllocation allocation;
     VmaAllocationInfo info;
-};
+} AllocatedBuffer;
 
-struct VertexInputDescription
+typedef struct VertexInputDescription
 {
     VkVertexInputBindingDescription bindings[MAX_BINDINGS];
-    VkVertexInputAttributeDescription attributes[MAX_ATTRIBUTES];;
+    VkVertexInputAttributeDescription attributes[MAX_ATTRIBUTES];
 
-    uint32_t bindingCount = 0;
-    uint32_t attributeCount = 0;
-};
+    uint32_t bindingCount;
+    uint32_t attributeCount;
+} VertexInputDescription;
 
-struct PushColor {
+typedef struct PushColor {
     float r, g, b, a;
-};
+} PushColor;
 
 // Mesh Buffers on GPU
-struct Vertex
+typedef struct Vertex
 {
     HMM_Vec3 position;
     HMM_Vec3 normal;
     HMM_Vec2 texcoord;
 
-    HMM_Vec4 color = HMM_V4(1.0f, 1.0f, 1.0f, 1.0f);
+    HMM_Vec4 color;
 
     // skinning
-    uint8_t   joints[4] = {0,0,0,0};
-    float weights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    uint8_t   joints[4];
+    float weights[4];
 
-    static VertexInputDescription get_vertex_description();
-};
+} Vertex;
+
+static VertexInputDescription get_vertex_description();
 
 // holds the resources needed for a mesh
-struct GPUMeshBuffers
+typedef struct GPUMeshBuffers
 {
     AllocatedBuffer indexBuffer;
     AllocatedBuffer vertexBuffer;
     VkDeviceAddress vertexBufferAddress;
-};
+} GPUMeshBuffers;
 
 // push constants for our mesh object draws
-struct GPUDrawPushConstants
+typedef struct GPUDrawPushConstants
 {
     HMM_Mat4 worldMatrix;
     VkDeviceAddress vertexBuffer;
-};
+} GPUDrawPushConstants;

@@ -1,17 +1,14 @@
 #include <SDL3/SDL_events.h>
 #include "HandmadeMath.h"
 
-struct Camera {
+typedef struct Camera {
     HMM_Vec3 position;
     HMM_Vec3 velocity;
+    float pitch;
+    float yaw;
+} Camera;
 
-    float pitch = 0.0f;
-    float yaw = 0.0f;
-
-    void update();
-    void processSDLEvent(SDL_Event& e);
-
-    HMM_Mat4 getViewMatrix();
-    HMM_Mat4 getRotationMatrix();
-
-};
+void update(Camera *camera);
+void processSDLEvent(SDL_Event *e, Camera *camera);
+HMM_Mat4 getViewMatrix(Camera *camera);
+HMM_Mat4 getRotationMatrix(Camera *camera);

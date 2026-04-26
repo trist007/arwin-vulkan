@@ -12,35 +12,35 @@
 // Simple types
 // ================================================================
 
-struct LineVertex
+typedef struct LineVertex
 {
     HMM_Vec3 position;
-};
+} LineVertex;
 
-struct LinePipeline
+typedef struct LinePipeline
 {
     // SDL_GPU version (you can keep or remove if fully Vulkan)
     // SDL_GPUGraphicsPipeline *Pipeline;
     // SDL_GPUTransferBuffer   *transferBuffer;
     // SDL_GPUBuffer           *LineVertexBuffer;
 
-    LineVertex   LineVerts[MAX_DEBUG_LINES * 2];
+    struct LineVertex   LineVerts[MAX_DEBUG_LINES * 2];
     int          LineVertCount;
-};
+} LinePipeline;
 
-struct pipelineObjects
+typedef struct pipelineObjects
 {
     LinePipeline lp;
-};
+} pipelineObjects;
 
-struct Tri { int v[3]; };
+typedef struct Tri { int v[3]; } Tri;
 
 // ================================================================
 // Animation & Skeleton
 // ================================================================
 
 // per joint
-struct Joint
+typedef struct Joint
 {
     HMM_Mat4  inverseBindMatrix;   // column-major, compatible with HMM_Mat4
     int       parent;                  // -1 if root
@@ -48,48 +48,48 @@ struct Joint
     HMM_Vec3  defaultTranslation;
     HMM_Quat  defaultRotation;         // Changed to HMM_Quat (better than Vec4)
     HMM_Vec3  defaultScale;
-};
+} Joint;
 
 // animation keyframes
-struct Keyframe
+typedef struct Keyframe
 {
     float    time;
     HMM_Vec4 value;   // vec3 for trans/scale (w=0), quat for rotation
-};
+} Keyframe;
 
-struct AnimChannel
+typedef struct AnimChannel
 {
     int       jointIndex;
     int       type;        // 0=translation, 1=rotation, 2=scale
     Keyframe *keyframes;
     int       keyframeCount;
-};
+} AnimChannel;
 
-struct Animation
+typedef struct Animation
 {
     char         name[64];
     AnimChannel *channels;
     int          channelCount;
     float        duration;
-};
+} Animation;
 
-struct Material
+typedef struct Material
 {
-    HMM_Vec4 baseColorFactor = HMM_V4(1.0f, 1.0f, 1.0f, 1.0f);
+    HMM_Vec4 baseColorFactor;
     // We can add more later: metallicFactor, roughnessFactor, etc.
-};
+} Material;
 
-struct Primitive
+typedef struct Primitive
 {
     int          vertOffset;
     int          triOffset;
     int          triCount;
-    int          materialIndex = 0;
+    int          materialIndex;
     unsigned int color;   // keep as unsigned int if you prefer ARGB packing
-};
+} Primitive;
 
 // mesh
-struct Mesh
+typedef struct Mesh
 {
     Vertex    *verts;
     int        vertCount;
@@ -100,45 +100,45 @@ struct Mesh
     int        primitiveCount;
 
     Material   materials[8];
-    int        materialCount = 0;
-};
+    int        materialCount;
+} Mesh;
 
 // Skeleton
-struct Skeleton
+typedef struct Skeleton
 {
     Joint *joints;
     int    jointCount;
-};
+} Skeleton;
 
-struct Transform
+typedef struct Transform
 {
     HMM_Vec3 translation;
     HMM_Quat rotation;      // quaternion
     HMM_Vec3 scale;
-};
+} Transform;
 
-struct Pose
+typedef struct Pose
 {
     Transform *joints;         // local space transforms
     HMM_Mat4  *skinMatrices;   // final skinning matrices (one per joint)
     int        jointCount;
-};
+} Pose;
 
 // Background (if still needed)
-struct Background
+typedef struct Background
 {
     // SDL_GPUTexture          *backgroundTexture;   // remove if fully Vulkan
     // SDL_GPUSampler          *backgroundSampler;
     // SDL_GPUGraphicsPipeline *backgroundPipeline;
     int width;
     int height;
-};
+} Background;
 
 // ================================================================
 // Main Model
 // ================================================================
 
-struct Model
+typedef struct Model
 {
     // CPU side
     Mesh       mesh;
@@ -149,46 +149,48 @@ struct Model
     int        jointCount;
 
     // GPU side - Vulkan
-    VkBuffer          vertexBuffer = VK_NULL_HANDLE;
-    VmaAllocation     vertexBufferAllocation = VK_NULL_HANDLE;
-    VkDeviceSize      vertexBufferSize = 0;
-    VkDeviceSize      indexBufferOffset = 0;
+    VkBuffer          vertexBuffer;
+    VmaAllocation     vertexBufferAllocation;
+    VkDeviceSize      vertexBufferSize;
+    VkDeviceSize      indexBufferOffset;
 
-    VkBuffer          indexBuffer = VK_NULL_HANDLE;
-    VmaAllocation     indexBufferAlloc = VK_NULL_HANDLE;
-    VkDeviceSize      indexBufferSize = 0;
+    VkBuffer          indexBuffer;
+    VmaAllocation     indexBufferAlloc;
+    VkDeviceSize      indexBufferSize;
 
-    uint32_t          indexCount = 0;
-    VkIndexType       indexType  = VK_INDEX_TYPE_UINT32;
+    uint32_t          indexCount;
+    VkIndexType       indexType;
 
     // Skinning buffer (SSBO recommended)
-    VkBuffer          skinningBuffer = VK_NULL_HANDLE;
-    VmaAllocation     skinningBufferAlloc = VK_NULL_HANDLE;
-    void*             skinningMapped = nullptr;
+    VkBuffer          skinningBuffer;
+    VmaAllocation     skinningBufferAlloc;
+    void*             skinningMapped;
 
     // Per-model uniform buffer (model matrix, etc.)
-    VkBuffer          uniformBuffer = VK_NULL_HANDLE;
-    VmaAllocation     uniformBufferAlloc = VK_NULL_HANDLE;
-    void*             uniformMapped = nullptr;
+    VkBuffer          uniformBuffer;
+    VmaAllocation     uniformBufferAlloc;
+    void*             uniformMapped;
 
     // glTF textures
-    VkImage     textureImage = VK_NULL_HANDLE;
-    VkImageView textureImageView = VK_NULL_HANDLE;
-    VkSampler   textureSampler = VK_NULL_HANDLE;
-};
+    VkImage     textureImage;
+    VkImageView textureImageView;
+    VkSampler   textureSampler;
+} Model;
 
-struct Player
+typedef struct Player
 {
     HMM_Vec3 position;
-};
+} Player;
 
-struct GameState
+typedef struct GameState
 {
     Arena *arena;
     Model model;
     Model room;
     Player player;
-};
+    HMM_Vec3 position;
+    HMM_Vec3 velocity;
+} GameState;
 
 
 // ================================================================
@@ -229,14 +231,16 @@ static inline void read_uint(cgltf_accessor* acc, int index, unsigned int* out)
 // ================================================================
 
 struct VulkanEngine;
+struct FontAtlas;
+
 Model load_gltf_model(Arena* arena, const char* path);   // or Model if you renamed it
-bool upload_model_to_gpu(VulkanEngine* engine, Model* model);
-bool LoadFontAtlas(VulkanEngine *engine, FontAtlas *atlas);
+bool upload_model_to_gpu(struct VulkanEngine *engine, struct Model *model);
+bool LoadFontAtlas(struct VulkanEngine *engine, struct FontAtlas *atlas);
 
 // You should implement these using HMM:
 void extract_materials(Arena *arena, cgltf_data* data, Mesh* mesh);
 void extract_skeleton(Arena *arena, cgltf_data* data, Skeleton* skeleton);
 void extract_animations(Arena *arena, cgltf_data* data, Model* model);
 // void update_pose(Model* model, float time);   // example
-static VkCommandBuffer begin_single_time_commands(VulkanEngine* engine);
-static void end_single_time_commands(VulkanEngine* engine, VkCommandBuffer commandBuffer);
+static VkCommandBuffer begin_single_time_commands(struct VulkanEngine* engine);
+static void end_single_time_commands(struct VulkanEngine* engine, VkCommandBuffer commandBuffer);

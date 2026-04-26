@@ -1,6 +1,7 @@
 #include "vk_initializers.h"
 
-VkCommandPoolCreateInfo vkinit::command_pool_create_info(uint32_t queueFamilyIndex, VkCommandPoolCreateFlags flags /*=0*/)
+/*
+VkCommandPoolCreateInfo vkinit::command_pool_create_info(uint32_t queueFamilyIndex, VkCommandPoolCreateFlags flags //=0)
 {
     VkCommandPoolCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -10,7 +11,7 @@ VkCommandPoolCreateInfo vkinit::command_pool_create_info(uint32_t queueFamilyInd
     return info;
 }
 
-VkCommandBufferAllocateInfo vkinit::command_buffer_allocate_info(VkCommandPool pool, uint32_t count /*=1*/)
+VkCommandBufferAllocateInfo vkinit::command_buffer_allocate_info(VkCommandPool pool, uint32_t count //=1)
 {
     VkCommandBufferAllocateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -21,7 +22,7 @@ VkCommandBufferAllocateInfo vkinit::command_buffer_allocate_info(VkCommandPool p
     return info;
 }
 
-VkFenceCreateInfo vkinit::fence_create_info(VkFenceCreateFlags flags /*= 0*/)
+VkFenceCreateInfo vkinit::fence_create_info(VkFenceCreateFlags flags //= 0)
 {
     VkFenceCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -32,7 +33,7 @@ VkFenceCreateInfo vkinit::fence_create_info(VkFenceCreateFlags flags /*= 0*/)
     return info;
 }
 
-VkSemaphoreCreateInfo vkinit::semaphore_create_info(VkSemaphoreCreateFlags flags /*= 0*/)
+VkSemaphoreCreateInfo vkinit::semaphore_create_info(VkSemaphoreCreateFlags flags //= 0)
 {
     VkSemaphoreCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -41,7 +42,7 @@ VkSemaphoreCreateInfo vkinit::semaphore_create_info(VkSemaphoreCreateFlags flags
     return info;
 }
 
-VkCommandBufferBeginInfo vkinit::command_buffer_begin_info(VkCommandBufferUsageFlags flags /*= 0*/)
+VkCommandBufferBeginInfo vkinit::command_buffer_begin_info(VkCommandBufferUsageFlags flags //= 0)
 {
     VkCommandBufferBeginInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -107,34 +108,6 @@ VkSubmitInfo2 vkinit::submit_info(VkCommandBufferSubmitInfo* cmd, VkSemaphoreSub
     return info;
 }
 
-VkImageCreateInfo image_create_info(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent)
-{
-    VkImageCreateInfo info = {};
-    info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    info.pNext = nullptr;
-
-    info.imageType = VK_IMAGE_TYPE_2D;
-
-    info.format = format;
-    info.extent = extent;
-
-    info.mipLevels = 1;
-    info.arrayLayers = 1;
-
-    //for MSAA. we will not be using it by default, so default it to 1 sample per pixel.
-    info.samples = VK_SAMPLE_COUNT_1_BIT;
-
-    //optimal tiling, which means the image is stored on the best gpu format
-    // we allow the gpu to shuffle the data howver it sees fit, if we want to read
-    // the image data from cpu we would need to use tilling LINEAR which makes the gpu data
-    // into a simple 2D array, but this tilling highly limits what the gpu can do, so the only real
-    // use case for LINEAR is CPU readback
-    info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    info.usage = usageFlags;
-
-    return info;
-}
-
 VkImageViewCreateInfo vkinit::imageview_create_info(VkFormat format, VkImage image, VkImageAspectFlags aspectFlags)
 {
           // build a image-view for the depth image to use for rendering
@@ -155,7 +128,7 @@ VkImageViewCreateInfo vkinit::imageview_create_info(VkFormat format, VkImage ima
 }
 
 VkRenderingAttachmentInfo vkinit::attachment_info(
-    VkImageView view, VkClearValue* clear, VkImageLayout layout /*= VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL*/)
+    VkImageView view, VkClearValue* clear, VkImageLayout layout //= VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
 {
     VkRenderingAttachmentInfo colorAttachment {};
     colorAttachment.sType  = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -173,7 +146,7 @@ VkRenderingAttachmentInfo vkinit::attachment_info(
 }
 
 VkRenderingAttachmentInfo vkinit::depth_attachment_info(
-    VkImageView view, VkImageLayout layout /*= VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL*/)
+    VkImageView view, VkImageLayout layout //= VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
 {
     VkRenderingAttachmentInfo depthAttachment {};
     depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -234,3 +207,33 @@ VkPipelineShaderStageCreateInfo vkinit::pipeline_shader_stage_create_info(VkShad
     info.pName = entry;
     return info;
 }
+*/
+
+VkImageCreateInfo image_create_info(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent)
+{
+    VkImageCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    info.pNext = NULL;
+
+    info.imageType = VK_IMAGE_TYPE_2D;
+
+    info.format = format;
+    info.extent = extent;
+
+    info.mipLevels = 1;
+    info.arrayLayers = 1;
+
+    //for MSAA. we will not be using it by default, so default it to 1 sample per pixel.
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+
+    //optimal tiling, which means the image is stored on the best gpu format
+    // we allow the gpu to shuffle the data howver it sees fit, if we want to read
+    // the image data from cpu we would need to use tilling LINEAR which makes the gpu data
+    // into a simple 2D array, but this tilling highly limits what the gpu can do, so the only real
+    // use case for LINEAR is CPU readback
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = usageFlags;
+
+    return info;
+}
+

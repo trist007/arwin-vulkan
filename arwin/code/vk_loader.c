@@ -1,3 +1,4 @@
+#define VK_NO_PROTOTYPES
 #include "vk_loader.h"
 
 #include "HandmadeMath.h"
