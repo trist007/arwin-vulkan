@@ -810,6 +810,7 @@ void destroy_image(VulkanEngine *engine, const AllocatedImage &img) {
   vmaDestroyImage(engine->allocator, img.image, img.allocation);
 }
 
+/*
 void RenderText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
               const char* text, float screenX, float screenY,
               float red, float green, float blue)
@@ -930,6 +931,208 @@ void RenderText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
 
     //vmaDestroyBuffer(engine->allocator, stagingBuffer, stagingAlloc);
 
+}
+    */
+/*
+void RenderText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
+                const char* text, float screenX, float screenY,
+                float red, float green, float blue)
+{
+    if (!text || !atlas || atlas->atlasWidth == 0 || !engine->textPipeline) {
+        return;
+    }
+
+    int len = 0;
+    while (text[len]) ++len;
+    if (len == 0) return;
+
+    TextVertex* verts = (TextVertex*)alloca(len * 6 * sizeof(TextVertex));
+    int vertCount = 0;
+
+    float cursorX = floorf(screenX);
+    float cursorY = floorf(screenY);
+
+    for (int i = 0; i < len; ++i)
+    {
+        unsigned char c = (unsigned char)text[i];
+        if (c < 32 || c > 127) {
+            cursorX += 14.0f;
+            continue;
+        }
+
+        Glyph* g = &atlas->glyphs[c];
+
+        float charX = cursorX + g->xoff;
+        float charY = cursorY - atlas->baseline * 0.7f + g->yoff;
+
+        float x0 = charX;
+        float y0 = charY;
+        float x1 = charX + (g->xoff2 - g->xoff);
+        float y1 = charY + (g->yoff2 - g->yoff);
+
+        float ndc_x0 = (x0 / engine->windowExtent.width)  * 2.0f - 1.0f;
+        float ndc_y0 = 1.0f - (y0 / engine->windowExtent.height) * 2.0f;
+        float ndc_x1 = (x1 / engine->windowExtent.width)  * 2.0f - 1.0f;
+        float ndc_y1 = 1.0f - (y1 / engine->windowExtent.height) * 2.0f;
+
+        float u0 = g->u0, v0 = g->v1;
+        float u1 = g->u1, v1 = g->v0;
+
+        verts[vertCount++] = TextVertex{{ndc_x0, ndc_y0}, {u0, v0}};
+        verts[vertCount++] = TextVertex{{ndc_x1, ndc_y0}, {u1, v0}};
+        verts[vertCount++] = TextVertex{{ndc_x0, ndc_y1}, {u0, v1}};
+
+        verts[vertCount++] = TextVertex{{ndc_x1, ndc_y0}, {u1, v0}};
+        verts[vertCount++] = TextVertex{{ndc_x1, ndc_y1}, {u1, v1}};
+        verts[vertCount++] = TextVertex{{ndc_x0, ndc_y1}, {u0, v1}};
+
+        cursorX += g->width + 6.0f;
+    }
+
+    if (vertCount == 0) return;
+
+    // Push color for this string
+    struct PushColor push = { red, green, blue, 1.0f };
+    vkCmdPushConstants(cmd, engine->textPipelineLayout, 
+                       VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
+
+    // ====================== STAGING BUFFER ======================
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAlloc;
+
+    VkBufferCreateInfo stagingCI = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size  = (VkDeviceSize)(vertCount * sizeof(TextVertex)),
+        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    };
+
+    VmaAllocationCreateInfo allocCI = {
+        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
+                 VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .usage = VMA_MEMORY_USAGE_AUTO
+    };
+
+    VK_CHECK(vmaCreateBuffer(engine->allocator, &stagingCI, &allocCI,
+                             &stagingBuffer, &stagingAlloc, NULL));
+
+    void* mapped;
+    vmaMapMemory(engine->allocator, stagingAlloc, &mapped);
+    memcpy(mapped, verts, vertCount * sizeof(TextVertex));
+    vmaUnmapMemory(engine->allocator, stagingAlloc);
+
+    // Draw
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &stagingBuffer, &offset);
+    vkCmdDraw(cmd, vertCount, 1, 0, 0);
+
+    // === Crucial: Only destroy the OLD buffer, keep the new one alive until next frame ===
+    if (engine->textStagingBuffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(engine->allocator, engine->textStagingBuffer, engine->textStagingAlloc);
+    }
+
+    engine->textStagingBuffer = stagingBuffer;
+    engine->textStagingAlloc  = stagingAlloc;
+}
+    */
+
+void RenderText(VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
+                const char* text, float screenX, float screenY,
+                float red, float green, float blue)
+{
+    if (!text || !atlas || atlas->atlasWidth == 0 || !engine->textPipeline) {
+        return;
+    }
+
+    int len = 0;
+    while (text[len]) ++len;
+    if (len == 0) return;
+
+    TextVertex* verts = (TextVertex*)alloca(len * 6 * sizeof(TextVertex));
+    int vertCount = 0;
+
+    float cursorX = floorf(screenX);
+    float cursorY = floorf(screenY);
+
+    for (int i = 0; i < len; ++i)
+    {
+        unsigned char c = (unsigned char)text[i];
+        if (c < 32 || c > 127) {
+            cursorX += 14.0f;
+            continue;
+        }
+
+        Glyph* g = &atlas->glyphs[c];
+
+        float charX = cursorX + g->xoff;
+        float charY = cursorY - atlas->baseline * 0.7f + g->yoff;
+
+        float x0 = charX, y0 = charY;
+        float x1 = charX + (g->xoff2 - g->xoff);
+        float y1 = charY + (g->yoff2 - g->yoff);
+
+        float ndc_x0 = (x0 / engine->windowExtent.width)  * 2.0f - 1.0f;
+        float ndc_y0 = 1.0f - (y0 / engine->windowExtent.height) * 2.0f;
+        float ndc_x1 = (x1 / engine->windowExtent.width)  * 2.0f - 1.0f;
+        float ndc_y1 = 1.0f - (y1 / engine->windowExtent.height) * 2.0f;
+
+        float u0 = g->u0, v0 = g->v1;
+        float u1 = g->u1, v1 = g->v0;
+
+        verts[vertCount++] = TextVertex{{ndc_x0, ndc_y0}, {u0, v0}};
+        verts[vertCount++] = TextVertex{{ndc_x1, ndc_y0}, {u1, v0}};
+        verts[vertCount++] = TextVertex{{ndc_x0, ndc_y1}, {u0, v1}};
+
+        verts[vertCount++] = TextVertex{{ndc_x1, ndc_y0}, {u1, v0}};
+        verts[vertCount++] = TextVertex{{ndc_x1, ndc_y1}, {u1, v1}};
+        verts[vertCount++] = TextVertex{{ndc_x0, ndc_y1}, {u0, v1}};
+
+        cursorX += g->width + 6.0f;
+    }
+
+    if (vertCount == 0) return;
+
+    // Push color
+    struct PushColor push = { red, green, blue, 1.0f };
+    vkCmdPushConstants(cmd, engine->textPipelineLayout, 
+                       VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
+
+    // ====================== ONE STAGING BUFFER PER FRAME ======================
+    // Create buffer on first text call this frame
+    if (engine->textStagingBuffer == VK_NULL_HANDLE)
+    {
+        VkDeviceSize bufferSize = 1024 * 6 * sizeof(TextVertex); // enough for ~1000 characters
+
+        VkBufferCreateInfo ci = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size  = bufferSize,
+            .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+        };
+
+        VmaAllocationCreateInfo allocCI = {
+            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
+                     VMA_ALLOCATION_CREATE_MAPPED_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO
+        };
+
+        VK_CHECK(vmaCreateBuffer(engine->allocator, &ci, &allocCI,
+                                 &engine->textStagingBuffer, 
+                                 &engine->textStagingAlloc, NULL));
+    }
+
+    // Append vertices
+    void* mapped;
+    vmaMapMemory(engine->allocator, engine->textStagingAlloc, &mapped);
+    TextVertex* dst = (TextVertex*)mapped + engine->textVertexCountThisFrame;
+    memcpy(dst, verts, vertCount * sizeof(TextVertex));
+    vmaUnmapMemory(engine->allocator, engine->textStagingAlloc);
+
+    // Draw from the right offset
+    VkDeviceSize offset = engine->textVertexCountThisFrame * sizeof(TextVertex);
+    vkCmdBindVertexBuffers(cmd, 0, 1, &engine->textStagingBuffer, &offset);
+    vkCmdDraw(cmd, vertCount, 1, 0, 0);
+
+    // Update count for next text call this frame
+    engine->textVertexCountThisFrame += vertCount;
 }
 
 bool
@@ -1506,6 +1709,8 @@ begin_frame(VulkanEngine *engine)
         engine->stagingBuffer = VK_NULL_HANDLE;
         engine->stagingAlloc = VK_NULL_HANDLE;
     }
+
+    engine->textVertexCountThisFrame = 0;
 
     // =============================================
     // 2. Wait for GPU to finish with this frame

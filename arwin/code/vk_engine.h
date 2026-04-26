@@ -238,8 +238,8 @@ struct VulkanEngine
     VkBuffer  textStagingBuffer = VK_NULL_HANDLE;
     VmaAllocation stagingAlloc = VK_NULL_HANDLE;
     VmaAllocation textStagingAlloc = VK_NULL_HANDLE;
+    int textVertexCountThisFrame = 0;
     
-
     // memory arena
     Arena *arena;
 };
