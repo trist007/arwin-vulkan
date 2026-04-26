@@ -393,5 +393,7 @@ evalDevice(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevice device, s
         SDL_Log("Failed to enumerate device extensions: %d\n", result); 
     }
 
+    //! get VkPhysicalDeviceMemoryProperties 
+
     return(score);
 }

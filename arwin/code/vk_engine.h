@@ -1,4 +1,6 @@
-#pragma once
+#ifndef VK_ENGINE_H
+#define VK_ENGINE_H
+
 #include "vk_types.h"
 #include "vk_descriptors.h"
 #include "vk_loader.h"
@@ -11,22 +13,10 @@
 #include "slang/slang.h"
 #include "slang/slang-com-ptr.h"
 
+#define FRAME_OVERLAP 2
 #define MAX_SWAPCHAIN_IMAGES 4
 #define MAX_TEXTURES 3
 #define MAX_DEPTH_FORMATS 3
-
-// ! NOTE: trist007: deque is a double ended Queue that allows fast insertion and deletion at both
-// ! front and back ends, unlike a regular array which is only fast at the back
-// ! std::deque works like a mix between a vector and a linked list
-/* Example of a deque impl
-std::deque<int> d;
-d.push_back(1);   // add to back
-d.push_front(2);  // add to front
-d.pop_back();     // remove from back
-d.pop_front();    // remove from front
-*/
-
-// ====================== DELETION QUEUE ======================
 
 #define DELETION_QUEUE_INITIAL_CAPACITY 64
 
@@ -40,7 +30,7 @@ struct DeletionEntry
 
 struct DeletionQueue
 {
-    DeletionEntry* entries;
+    struct DeletionEntry* entries;
     uint32_t count;
     uint32_t capacity;
 };
@@ -50,49 +40,16 @@ struct ImageDeletion
 {
     VkDevice device;
     VkImageView view;
-    VmaAllocator allocator;
     VkImage image;
-    VmaAllocation allocation;
 };
 
 struct AllocatedImageDeletion
 {
     VkDevice       device;
     VkImageView    imageView;
-    VmaAllocator   allocator;
     VkImage        image;
-    VmaAllocation  allocation;
 };
 
-
-/*
-// this is a poor performance way of doing callbacks as it is inefficient at scale storing
-// whole std::functions for every object, but will suffice for our exercise
-// ! NOTE: trist007: if you need to delete thousands of objects a better impl
-// ! would be to store arrays of vulkan handles of various types such as VkImage, VkBuffer,
-// ! and so on and then delete those from a loop
-struct DeletionQueue
-{
-    std::deque<std::function<void()>> deletors;
-
-    // this pushes a lambda meant for deletion
-    void push_function(std::function<void()>&& function)
-    {
-        deletors.push_back(function); // adds it to the back of the deque
-    }
-
-    // this starts at the last/most recent element that was added to the queue and calls
-    // the lambda to delete, in Vulkan you need to delete in reverse order
-    void flush()
-    {
-        for (auto it = deletors.rbegin(); it != deletors.rend(); it++) // last added first destroyed
-        {
-            (*it)();
-        }
-        deletors.clear();
-    }
-};
-*/
 
 struct GPUSceneData
 {
@@ -111,7 +68,7 @@ struct ShaderData
     HMM_Mat4 view;
     HMM_Mat4 model;
 
-    HMM_Vec4 lightPos = HMM_V4(5.0f, 10.0f, 10.0f, 1.0f);   // better default position
+    HMM_Vec4 lightPos;
 
     // Per-material data - we'll use index 0 for now (single model)
     //HMM_Vec4 baseColorFactor = HMM_V4(1.0f, 1.0f, 1.0f, 1.0f);
@@ -122,15 +79,13 @@ struct ShaderData
 
 struct ShaderDataBuffer
 {
-    VmaAllocation allocation{ VK_NULL_HANDLE };
-    VmaAllocationInfo allocationInfo{};
-    VkBuffer buffer{ VK_NULL_HANDLE };
-    VkDeviceAddress deviceAddress{};
+    VkBuffer buffer;
+    VkDeviceAddress deviceAddress;
 };
 
 struct FrameData
 {
-    DeletionQueue deletionQueue;
+    struct DeletionQueue deletionQueue;
     DescriptorAllocatorGrowable frameDescriptors;
 
     // howtoVulkan
@@ -138,10 +93,10 @@ struct FrameData
     VkSemaphore renderSemaphore;
     VkFence renderFence;
 
-    ShaderDataBuffer shaderDataBuffers; // GPU buffer
-    ShaderData shaderData;              // CPU data
-    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+    struct ShaderDataBuffer shaderDataBuffers; // GPU buffer
+    struct ShaderData shaderData;              // CPU data
+    VkCommandBuffer commandBuffer;
+    VkDescriptorSet descriptorSet;
 };
 
 struct ComputePushConstants
@@ -159,7 +114,7 @@ struct ComputeEffect
     VkPipeline pipeline;
     VkPipelineLayout layout;
 
-    ComputePushConstants data;
+    struct ComputePushConstants data;
 };
 
 struct ivec2
@@ -167,11 +122,8 @@ struct ivec2
     int x, y;
 };
 
-constexpr unsigned int FRAME_OVERLAP = 2;
-
 struct Texture
 {
-    VmaAllocation allocation;
     VkImage image;
     VkImageView view;
     VkSampler sampler;
@@ -201,22 +153,19 @@ struct VulkanEngine
     // queues
     VkQueue graphicsQueue;
     uint32_t graphicsQueueFamily;
-    DeletionQueue mainDeletionQueue;
+    struct DeletionQueue mainDeletionQueue;
 
-    // VMA
-    VmaAllocator allocator;
-    VkBuffer vBuffer = VK_NULL_HANDLE;
-    VmaAllocation vBufferAllocation = VK_NULL_HANDLE;
-    VkDeviceSize vertexBufferSize = 0;
-    VkDeviceSize indexBufferOffset = 0;
+    VkBuffer vBuffer;
+    VkDeviceSize vertexBufferSize;
+    VkDeviceSize indexBufferOffset;
 
     // pools
-    VkCommandPool commandPool{ VK_NULL_HANDLE };
+    VkCommandPool commandPool;
 
     // frames
-    FrameData frames[FRAME_OVERLAP];
-    uint32_t imageIndex{};
-    uint32_t frameIndex{};
+    struct FrameData frames[FRAME_OVERLAP];
+    uint32_t imageIndex;
+    uint32_t frameIndex;
 
     // tiny obj loader
     //tinyobj::attrib_t attrib;
@@ -224,25 +173,25 @@ struct VulkanEngine
     //std::vector<tinyobj::material_t> materials;
 
     // textures
-    Texture textures[MAX_TEXTURES];
-    uint32_t textureCount = MAX_TEXTURES;
+    struct Texture textures[MAX_TEXTURES];
+    uint32_t textureCount;
     
     // meshes
-    uint32_t indexCount = 0;
+    uint32_t indexCount;
 
     // descriptors
-    VkDescriptorSetLayout descriptorSetLayoutTex = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-    VkDescriptorSet descriptorSetTex = VK_NULL_HANDLE;
+    VkDescriptorSetLayout descriptorSetLayoutTex;
+    VkDescriptorPool descriptorPool;
+    VkDescriptorSet descriptorSetTex;
 
-    VkDescriptorSetLayout textDescriptorSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool textDescriptorPool = VK_NULL_HANDLE;
-    VkDescriptorSet       textDescriptorSet = VK_NULL_HANDLE;
+    VkDescriptorSetLayout textDescriptorSetLayout;
+    VkDescriptorPool textDescriptorPool;
+    VkDescriptorSet       textDescriptorSet;
 
     // model
-    HMM_Vec3 camPos{0.0f, 0.0f, -6.0f};
-    HMM_Vec3 objectRotations[3]{};
-    ivec2 windowSize();
+    HMM_Vec3 camPos;
+    HMM_Vec3 objectRotations[3];
+    struct ivec2 windowSize;
 
     // slang
     Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
@@ -253,87 +202,85 @@ struct VulkanEngine
     VkImage swapchainImages[MAX_SWAPCHAIN_IMAGES];
     VkImageView swapchainImageViews[MAX_SWAPCHAIN_IMAGES];
     //VkImage depthImage{ VK_NULL_HANDLE };
-    AllocatedImage depthImage{ VK_NULL_HANDLE };
-    VmaAllocation depthImageAllocation{ VK_NULL_HANDLE };
+    AllocatedImage depthImage;
     AllocatedImage drawImage;
     VkFormat swapchainImageFormat;
-    VkFormat depthFormat = VK_FORMAT_UNDEFINED;
-    VkImageView depthImageView{ VK_NULL_HANDLE };
+    VkFormat depthFormat;
+    VkImageView depthImageView;
 
     // pipeline
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout pipelineLayout;
+    VkPipeline graphicsPipeline;
 
     // text rendering with Vulkan
-    VkPipeline      textPipeline = VK_NULL_HANDLE;
-    VkPipelineLayout textPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline      textPipeline;
+    VkPipelineLayout textPipelineLayout;
 
     // Font atlas
     FontAtlas       fontAtlas;
 
     // text rendering with OpenGL
     GameFont font;
-    int pixelHeight = 24;
-    VkBuffer  stagingBuffer = VK_NULL_HANDLE;
-    VkBuffer  textStagingBuffer = VK_NULL_HANDLE;
-    VmaAllocation stagingAlloc = VK_NULL_HANDLE;
-    VmaAllocation textStagingAlloc = VK_NULL_HANDLE;
-    int textVertexCountThisFrame = 0;
+    int pixelHeight;
+    VkBuffer  stagingBuffer;
+    VkBuffer  textStagingBuffer;
+    int textVertexCountThisFrame;
     
     // memory arena
     Arena *arena;
 };
 
 // singleton for pointer retrieval
-VulkanEngine *getVulkanEngine(void);
+struct VulkanEngine *getVulkanEngine(void);
 
 struct GameState;
 // init functions
-void init_vulkan(VulkanEngine *engine);
-void init_swapchain(VulkanEngine *engine);
-bool init_mezzanine(VulkanEngine *engine, GameState *gameState);
+void init_vulkan(struct VulkanEngine *engine);
+void init_swapchain(struct VulkanEngine *engine);
+bool init_mezzanine(struct VulkanEngine *engine, GameState *gameState);
 
 // init_mezzanine
-bool load_and_upload_gltf_models(VulkanEngine *engine, GameState *gameState);
-bool create_per_frame_uniform_buffers(VulkanEngine *engine);
-bool create_main_3d_descriptor_layout_and_set(VulkanEngine *engine);
-bool create_main_graphics_pipeline(VulkanEngine *engine);
-bool setup_font_atlas_and_text_pipeline(VulkanEngine *engine);
+bool load_and_upload_gltf_models(struct VulkanEngine *engine, GameState *gameState);
+bool create_per_frame_uniform_buffers(struct VulkanEngine *engine);
+bool create_main_3d_descriptor_layout_and_set(struct VulkanEngine *engine);
+bool create_main_graphics_pipeline(struct VulkanEngine *engine);
+bool setup_font_atlas_and_text_pipeline(struct VulkanEngine *engine);
 
 // main render loop
-void mainRenderLoop(VulkanEngine *engine, GameState *gameState);
-void update_shader_data(VulkanEngine *engine, GameState *gameState);
-void begin_frame(VulkanEngine *engine);
-void begin_rendering(VulkanEngine *engine, VkCommandBuffer cmd);
-void draw_3d_scene(VulkanEngine *engine, GameState *gameState, VkCommandBuffer cmd);
-void draw_ui_text(VulkanEngine *engine, VkCommandBuffer cmd);
-void end_rendering(VulkanEngine *engine, VkCommandBuffer cmd);
-void submit_and_present(VulkanEngine *engine);
+void mainRenderLoop(struct VulkanEngine *engine, GameState *gameState);
+void update_shader_data(struct VulkanEngine *engine, GameState *gameState);
+void begin_frame(struct VulkanEngine *engine);
+void begin_rendering(struct VulkanEngine *engine, VkCommandBuffer cmd);
+void draw_3d_scene(struct VulkanEngine *engine, GameState *gameState, VkCommandBuffer cmd);
+void draw_ui_text(struct VulkanEngine *engine, VkCommandBuffer cmd);
+void end_rendering(struct VulkanEngine *engine, VkCommandBuffer cmd);
+void submit_and_present(struct VulkanEngine *engine);
 
-void create_swapchain(VulkanEngine *engine, uint32_t width, uint32_t height);
-void destroy_swapchain(VulkanEngine *engine);
-void draw_imgui(VulkanEngine *engine, VkCommandBuffer cmd, VkImageView targetImageView);
-void resize_swapchain(VulkanEngine *engine);
+void create_swapchain(struct VulkanEngine *engine, uint32_t width, uint32_t height);
+void destroy_swapchain(struct VulkanEngine *engine);
+void draw_imgui(struct VulkanEngine *engine, VkCommandBuffer cmd, VkImageView targetImageView);
+void resize_swapchain(struct VulkanEngine *engine);
 
-void initVulkanEngine(VulkanEngine *engine, GameState *gameState);
-void cleanupVulkanEngine(VulkanEngine *engine);
-void howtoCleanupVulkanEngine(VulkanEngine *engine);
+void initVulkanEngine(struct VulkanEngine *engine, GameState *gameState);
+void cleanupVulkanEngine(struct VulkanEngine *engine);
+void howtoCleanupVulkanEngine(struct VulkanEngine *engine);
 
-void runVulkanEngine(VulkanEngine *engine, GameState *gameState);
-FrameData *getCurrentFrame(VulkanEngine *engine);
-void RenderText(VulkanEngine *engine, VkCommandBuffer cmd, FontAtlas *atlas,
-const char *text, float x, float y, float red = 1.0f, float green = 0.0f, float blue = 0.0f);
+void runVulkanEngine(struct VulkanEngine *engine, GameState *gameState);
+struct FrameData *getCurrentFrame(struct VulkanEngine *engine);
+void RenderText(struct VulkanEngine *engine, VkCommandBuffer cmd, FontAtlas *atlas,
+const char *text, float x, float y, float red, float green, float blue);
 
 // Textures
-AllocatedImage create_image(VulkanEngine *engine, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
-AllocatedImage create_image(VulkanEngine *engine, void *data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
-void destroy_image(VulkanEngine *engine, const AllocatedImage &img);
+AllocatedImage create_image(struct VulkanEngine *engine, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped);
+AllocatedImage create_image(struct VulkanEngine *engine, void *data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped);
+void destroy_image(struct VulkanEngine *engine, const AllocatedImage *img);
 
 // DeletionQueue
-void deletion_queue_init(DeletionQueue *queue);
-void deletion_queue_push(DeletionQueue *queue, DeletionFunc func, void* userdata);
-void deletion_queue_flush(DeletionQueue *queue);
-void deletion_queue_destroy(DeletionQueue *queue);
+void deletion_queue_init(struct DeletionQueue *queue);
+void deletion_queue_push(struct DeletionQueue *queue, DeletionFunc func, void* userdata);
+void deletion_queue_flush(struct DeletionQueue *queue);
+void deletion_queue_destroy(struct DeletionQueue *queue);
 void destroy_allocated_image(void* userdata);
-void deletion_queue_push_allocated_image(DeletionQueue *queue, VkDevice device, VkImageView view, VmaAllocator allocator, VkImage image, VmaAllocation allocation);
+void deletion_queue_push_allocated_image(struct DeletionQueue *queue, VkDevice device, VkImageView view, VkImage image);
 
+#endif

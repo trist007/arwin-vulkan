@@ -3,43 +3,61 @@ C++ compile time 8.35 seconds
 Things to Do
 ===============================================================
 
-1. Critical Bugs
+convert to custom memory manager to replace vma
+get VkPhysicalDeviceMemoryProperties to better optimize custom memory manager
+see what to do about slang since its C++
 
-In init_swapchain() – Duplicate deletion lambda
-You push the same deletion function twice (drawImage + depthImage). The second one duplicates the drawImage destroy.
-→ Leads to double-delete → crash on shutdown.
-
-In RenderText()
-You create a staging buffer every frame for text and never destroy it (commented out).
-This leaks memory badly.Fix for text (recommended pattern):c
-
-// At top of mainRenderLoop or begin_frame
-if (engine->stagingBuffer != VK_NULL_HANDLE) {
-    vmaDestroyBuffer(engine->allocator, engine->stagingBuffer, engine->stagingAlloc);
-    engine->stagingBuffer = VK_NULL_HANDLE;
-}
-
-// ... in RenderText after vkCmdDraw ...
-// Do NOT destroy here. Let the frame cleanup handle it.
-engine->stagingBuffer = stagingBuffer;
-engine->stagingAlloc  = stagingAlloc;
-
-2. Important IssuesDescriptor pool too small in create_main_3d_descriptor_layout_and_set() — maxSets = 1 is dangerous.
-You’re using only one descriptor set for everything. This will bite you when you add more.
-update_shader_data() always writes to frames[0] in the descriptor write — should be per-frame.
-resize_swapchain() calls destroy_image manually but you have create_image() helper — inconsistency.
-Many places still use raw VK_CHECK without good error messages.
-constexpr bool bUseValidationLayers → make it runtime configurable.
-
-3. Minor / Style IssuesLots of magic numbers (FRAME_OVERLAP, MAX_SWAPCHAIN_IMAGES, etc.) — define them clearly.
+1. Minor / Style IssuesLots of magic numbers (FRAME_OVERLAP, MAX_SWAPCHAIN_IMAGES, etc.) — define them clearly.
 Some functions take GameState* but don’t always need it.
 destroyVulkanEngine is called howtoCleanupVulkanEngine — rename.
 You’re mixing SDL_Log and fprintf — pick one.
 
-Quick Wins (do these today)Fix the double deletion in init_swapchain().
-Move staging buffer destruction to begin_frame().
-Increase descriptor pool maxSets to at least FRAME_OVERLAP * 4.
-Make descriptor writes per-frame (don’t hardcode frames[0]).
+2. Roll your own memory manager to replace STL vk_mem_alloc.h
+
+Handle buffer-image granularity if you mix buffers and images in the same arena (query VkPhysicalDeviceLimits::bufferImageGranularity and use it as your page/alignment size). 
+
+kylehalladay.com
+
+Creating a Buffercpp
+
+VkBufferCreateInfo bufInfo = { /* ... your size + usage */ };
+VkBuffer buffer;
+vkCreateBuffer(device, &bufInfo, nullptr, &buffer);
+
+VkMemoryRequirements reqs;
+vkGetBufferMemoryRequirements(device, buffer, &reqs);
+
+// Find compatible memory type (bitmask & your chosen type)
+uint32_t memType = find_memory_type(physicalDevice, reqs.memoryTypeBits, desiredFlags);
+
+Allocation alloc = arena_alloc(myArena, reqs.size, reqs.alignment);
+vkBindBufferMemory(device, buffer, alloc.memory, alloc.offset);
+
+Do the same for images (vkGetImageMemoryRequirements + vkBindImageMemory).Memory Type SelectionYou still need to pick the right memoryTypeIndex based on usage:Device-local (static assets): VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+Staging / upload: VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+Dynamic / uniform data: Often host-visible + coherent (or device-local + staging copies)
+
+Query VkPhysicalDeviceMemoryProperties once and cache compatible types. You can have multiple arenas (one per common memory type).Reset / Lifetime StrategiesSince you mentioned a simple arena:Linear / bump-only — Reset offset = 0 at the start of each frame (or level load). Great for per-frame transient resources.
+Double-buffering — Two arenas; ping-pong between them.
+Free list — If you need true deallocation, add a simple free-list on top (or bucket by size like real allocators do).
+
+Tips & GotchasAlignment — Always respect VkMemoryRequirements::alignment + buffer-image granularity.
+Dedicated allocations — For very large resources (e.g. render targets), consider dedicated VkDeviceMemory (skip arena) for better performance on some drivers.
+Mapping — Prefer persistent mapping for host-visible arenas. Avoid mapping/unmapping per resource.
+Fragmentation — Linear arenas avoid it by design if you reset often. For long-lived allocations, you may eventually need buckets or a better sub-allocator.
+Debug — Track total used size per arena. Validation layers will catch bind/alignment errors.
+
+If You Want a Tiny Starting PointMany people start with one arena per memory type (or even just device-local + host-visible). Expand from there.Your existing arena code should map almost 1:1 — just make the backing store a VkDeviceMemory + offset instead of a void* from malloc.This approach is used in many custom engines and is exactly what VMA does under the hood for its default pools. You’ll get rid of the dependency and have full control.If you share snippets of your current arena impl or specific pain points (e.g. dynamic vs static resources), I can give more targeted code.
+
+Change the vma functions to these
+
+vmaCreateBuffer - vkCreateBuffer + arena_alloc + vkBindBufferMemory
+vmaCreateImage - vkCreateImage + arena_alloc + vkBindImageMemory
+vmaDestroyBuffer - vkDestroyBuffer only (memory stays in arena)
+vmaDestroyImage - vkDestroyImage only
+vmaMapMemory / vmaUnmap - vkMapMemory on the whole arena (persistent map)
+vmaCreateAllocator - Your own vkArena creation functions
+
 
 ===============================================================
 Bonus Improvements
