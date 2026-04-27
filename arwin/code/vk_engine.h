@@ -232,8 +232,8 @@ struct VulkanEngine
     Arena *arena;
 
     // vk memory arena
-    struct vkArena *deviceLocalArena; // GPU
-    struct vkArena *stagingArena;     // CPU
+    struct vkArena deviceLocalArena; // GPU
+    struct vkArena stagingArena;     // CPU
 
 };
 

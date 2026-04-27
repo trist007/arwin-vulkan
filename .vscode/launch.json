@@ -6,7 +6,7 @@
             "name": "Debug (Windows - MSVC)",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/arwin/bin/main.exe",
+            "program": "${workspaceFolder}/arwin/bin/arwin.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/arwin/bin",

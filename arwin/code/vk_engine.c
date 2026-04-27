@@ -211,7 +211,7 @@ void init_vulkan(struct VulkanEngine *engine) {
     if (deviceLocalType != UINT32_MAX) {
         VkResult res = createVkArena(engine->chosenGPU, engine->device, deviceLocalType,
                                     512ULL * 1024 * 1024,   // 512 MB
-                                    engine->deviceLocalArena);
+                                    &engine->deviceLocalArena);
         if (res == VK_SUCCESS)
             SDL_Log("✓ DeviceLocal Arena created (type %u)", deviceLocalType);
     }
@@ -225,7 +225,7 @@ void init_vulkan(struct VulkanEngine *engine) {
     if (stagingType != UINT32_MAX) {
         VkResult res = createVkArena(engine->chosenGPU, engine->device, stagingType,
                                     128ULL * 1024 * 1024,   // 128 MB
-                                    engine->stagingArena);
+                                    &engine->stagingArena);
         if (res == VK_SUCCESS)
             SDL_Log("✓ Staging Arena created (type %u)", stagingType);
     }
@@ -787,7 +787,7 @@ AllocatedImage create_image(struct VulkanEngine* engine,
     vkGetImageMemoryRequirements(engine->device, img.image, &reqs);
 
     // Allocate from arena
-    Allocation alloc = arena_alloc(engine->deviceLocalArena, reqs.size, reqs.alignment);
+    Allocation alloc = arena_alloc(&engine->deviceLocalArena, reqs.size, reqs.alignment);
 
     if (!allocation_valid(alloc))
     {
@@ -933,7 +933,7 @@ void RenderText(struct VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atl
 
         VK_CHECK(vkCreateBuffer(engine->device, &ci, NULL, &engine->textStagingBuffer));
 
-        Allocation alloc = arena_alloc(engine->stagingArena, bufferSize, 16);
+        Allocation alloc = arena_alloc(&engine->stagingArena, bufferSize, 16);
         if (!allocation_valid(alloc)) {
             SDL_Log("ERROR: Out of staging memory for text!");
             return;
@@ -946,7 +946,7 @@ void RenderText(struct VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atl
     }
 
     // Append vertices directly into persistently mapped arena
-    void* mapped = (char*)engine->stagingArena->mapped + engine->textStagingOffset;
+    void* mapped = (char*)engine->stagingArena.mapped + engine->textStagingOffset;
     TextVertex* dst = (TextVertex*)mapped + engine->textVertexCountThisFrame;
 
     memcpy(dst, verts, vertCount * sizeof(TextVertex));
@@ -1022,7 +1022,7 @@ bool create_per_frame_uniform_buffers(struct VulkanEngine *engine)
                                       &reqs);
 
         // Use staging arena (host visible + coherent)
-        Allocation alloc = arena_alloc(engine->stagingArena, reqs.size, reqs.alignment);
+        Allocation alloc = arena_alloc(&engine->stagingArena, reqs.size, reqs.alignment);
 
         if (!allocation_valid(alloc)) {
             SDL_Log("ERROR: Out of staging memory for uniform buffer!");
@@ -1553,7 +1553,7 @@ void update_shader_data(struct VulkanEngine *engine, GameState *gameState)
 
     // ====================== UPLOAD TO GPU (Arena) ======================
     // Since we use the staging arena which is persistently mapped
-    void* mapped = (char*)engine->stagingArena->mapped 
+    void* mapped = (char*)engine->stagingArena.mapped 
                  + currentFrame->shaderDataBuffers.offset;
 
     memcpy(mapped, &currentFrame->shaderData, sizeof(struct ShaderData));

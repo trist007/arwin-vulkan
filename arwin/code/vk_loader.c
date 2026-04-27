@@ -70,8 +70,9 @@ void extract_skeleton(Arena *arena, cgltf_data *data, Skeleton *skel)
     cgltf_skin *skin = &data->skins[0];
     
     skel->jointCount = (int)skin->joints_count;
+    SDL_Log("skel->jointCount = %d", skel->jointCount);
     skel->joints = (Joint*)arenaAlloc(arena, (skel->jointCount * sizeof(Joint)));
-    
+
     for(int i = 0; i < skel->jointCount; i++)
     {
         Joint *j = &skel->joints[i];
@@ -103,7 +104,7 @@ void extract_skeleton(Arena *arena, cgltf_data *data, Skeleton *skel)
         
         if(node->has_rotation)
         {
-            j->defaultRotation = (HMM_Quat){node->rotation[0], node->rotation[1], node->rotation[2], node->rotation[3]};
+            j->defaultRotation = HMM_Q(node->rotation[0], node->rotation[1], node->rotation[2], node->rotation[3]);
         }
         else
         {
@@ -384,6 +385,7 @@ load_gltf_model(Arena *arena, const char* path)
 
     // Extract skeleton & animations
     extract_skeleton(arena, data, &model.skeleton);
+
     extract_animations(arena, data, &model);
 
     cgltf_free(data);
@@ -421,7 +423,7 @@ bool upload_model_to_gpu(struct VulkanEngine* engine, Model* model)
     VkMemoryRequirements reqs;
     vkGetBufferMemoryRequirements(engine->device, model->vertexBuffer, &reqs);
 
-    Allocation gpuAlloc = arena_alloc(engine->deviceLocalArena, reqs.size, reqs.alignment);
+    Allocation gpuAlloc = arena_alloc(&engine->deviceLocalArena, reqs.size, reqs.alignment);
     if (!allocation_valid(gpuAlloc)) {
         SDL_Log("ERROR: Out of device local memory for model!");
         vkDestroyBuffer(engine->device, model->vertexBuffer, NULL);
@@ -444,7 +446,7 @@ bool upload_model_to_gpu(struct VulkanEngine* engine, Model* model)
 
     VK_CHECK(vkCreateBuffer(engine->device, &stagingCI, NULL, &stagingBuffer));
 
-    Allocation stagingAlloc = arena_alloc(engine->stagingArena, totalSize, 16);
+    Allocation stagingAlloc = arena_alloc(&engine->stagingArena, totalSize, 16);
     if (!allocation_valid(stagingAlloc)) {
         SDL_Log("ERROR: Out of staging memory!");
         vkDestroyBuffer(engine->device, stagingBuffer, NULL);
@@ -456,7 +458,7 @@ bool upload_model_to_gpu(struct VulkanEngine* engine, Model* model)
                                 stagingAlloc.memory, stagingAlloc.offset));
 
     // Copy data to staging
-    void* mapped = (char*)engine->stagingArena->mapped + stagingAlloc.offset;
+    void* mapped = (char*)engine->stagingArena.mapped + stagingAlloc.offset;
     memcpy(mapped, model->mesh.verts, vertexBufferSize);
     memcpy((char*)mapped + vertexBufferSize, model->mesh.tris, indexBufferSize);
 
@@ -554,7 +556,7 @@ bool LoadFontAtlas(struct VulkanEngine* engine, FontAtlas* atlas)
     VkMemoryRequirements reqs;
     vkGetImageMemoryRequirements(engine->device, atlas->image, &reqs);
 
-    Allocation alloc = arena_alloc(engine->deviceLocalArena, reqs.size, reqs.alignment);
+    Allocation alloc = arena_alloc(&engine->deviceLocalArena, reqs.size, reqs.alignment);
     if (!allocation_valid(alloc)) {
         SDL_Log("ERROR: Out of memory for font atlas");
         free(atlasBitmap);
@@ -577,7 +579,7 @@ bool LoadFontAtlas(struct VulkanEngine* engine, FontAtlas* atlas)
 
     VK_CHECK(vkCreateBuffer(engine->device, &stagingCI, NULL, &stagingBuffer));
 
-    Allocation stagingAlloc = arena_alloc(engine->stagingArena, bufferSize, 16); // 16-byte alignment is safe
+    Allocation stagingAlloc = arena_alloc(&engine->stagingArena, bufferSize, 16); // 16-byte alignment is safe
 
     if (!allocation_valid(stagingAlloc)) {
         SDL_Log("ERROR: Out of staging memory for font atlas");
@@ -590,7 +592,7 @@ bool LoadFontAtlas(struct VulkanEngine* engine, FontAtlas* atlas)
     VK_CHECK(vkBindBufferMemory(engine->device, stagingBuffer, stagingAlloc.memory, stagingAlloc.offset));
 
     // Copy data to mapped memory
-    void* mapped = (char*)engine->stagingArena->mapped + stagingAlloc.offset;
+    void* mapped = (char*)engine->stagingArena.mapped + stagingAlloc.offset;
     memcpy(mapped, atlasBitmap, bufferSize);
 
     // ====================== COMMAND BUFFER UPLOAD ======================
