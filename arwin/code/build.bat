@@ -33,7 +33,8 @@ REM -MT can't use -MT which statically links to the CRT but Vulkan Validation la
 REM CRT so need to use /MD to dynamically link 
 REM had to remove -EHa- /EHsc enabled exception handling but -EHa- disables it
 REM -WX is warnings as errors to be safe, if warning is ok I will suppress it with -wd<warning_no>
-set CommonCompilerFlags=/utf-8 /std:c17 /EHsc ^
+REM /Zc:__STDC__ tells msvc to be more compliant with standard C
+set CommonCompilerFlags=/utf-8 /std:c17 /Zc:__STDC__ /EHsc ^
     /MD -nologo -fp:fast -Gm- -Od -Oi -WX -W4 ^
     /Zc:threadSafeInit- ^
     /D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR ^
@@ -62,6 +63,7 @@ cl %CommonCompilerFlags% ^
     ..\code\vk_pipelines.c ^
     ..\code\vk_loader.c ^
     ..\code\camera.c ^
+    /Fe:arwin.exe ^
     /link %CommonLinkerFlags%
 
 REM/Fe:win32_arwin.exe

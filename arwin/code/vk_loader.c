@@ -1,4 +1,3 @@
-#define VK_NO_PROTOTYPES
 #include "vk_loader.h"
 
 #include "HandmadeMath.h"
@@ -15,7 +14,7 @@
 #include "stb_image_write.h"
 
 // Allocate and begin a one-time command buffer
-static VkCommandBuffer begin_single_time_commands(VulkanEngine* engine)
+static VkCommandBuffer begin_single_time_commands(struct VulkanEngine* engine)
 {
     VkCommandBufferAllocateInfo allocInfo = {
         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -38,7 +37,7 @@ static VkCommandBuffer begin_single_time_commands(VulkanEngine* engine)
 }
 
 // End, submit, and wait for the one-time command buffer to finish
-static void end_single_time_commands(VulkanEngine* engine, VkCommandBuffer commandBuffer)
+static void end_single_time_commands(struct VulkanEngine* engine, VkCommandBuffer commandBuffer)
 {
     VK_CHECK(vkEndCommandBuffer(commandBuffer));
 
@@ -95,29 +94,29 @@ void extract_skeleton(Arena *arena, cgltf_data *data, Skeleton *skel)
         // store default local transform from node
         if(node->has_translation)
         {
-            j->defaultTranslation = {node->translation[0], node->translation[1], node->translation[2]};
+            j->defaultTranslation = (HMM_Vec3){node->translation[0], node->translation[1], node->translation[2]};
         }
         else
         {
-            j->defaultTranslation = {0,0,0};
+            j->defaultTranslation = (HMM_Vec3){0,0,0};
         }
         
         if(node->has_rotation)
         {
-            j->defaultRotation = {node->rotation[0], node->rotation[1], node->rotation[2], node->rotation[3]};
+            j->defaultRotation = (HMM_Quat){node->rotation[0], node->rotation[1], node->rotation[2], node->rotation[3]};
         }
         else
         {
-            j->defaultRotation = {0,0,0,1};
+            j->defaultRotation = (HMM_Quat){0,0,0,1};
         }
         
         if(node->has_scale)
         {
-            j->defaultScale = {node->scale[0], node->scale[1], node->scale[2]};
+            j->defaultScale = (HMM_Vec3){node->scale[0], node->scale[1], node->scale[2]};
         }
         else
         {
-            j->defaultScale = {1,1,1};
+            j->defaultScale = (HMM_Vec3){1,1,1};
         }
         
         // find parent
@@ -340,7 +339,7 @@ load_gltf_model(Arena *arena, const char* path)
                     cgltf_accessor_read_uint(prim->indices, i*3+1, &b, 1);
                     cgltf_accessor_read_uint(prim->indices, i*3+2, &c, 1);
 
-                    model.mesh.tris[triOffset + i] = Tri{
+                    model.mesh.tris[triOffset + i] = (Tri){
                         (int)a + vertOffset,
                         (int)b + vertOffset,
                         (int)c + vertOffset
@@ -366,7 +365,7 @@ load_gltf_model(Arena *arena, const char* path)
             }
 
             if (model.mesh.primitiveCount < 16) {
-                model.mesh.primitives[model.mesh.primitiveCount++] = {
+                model.mesh.primitives[model.mesh.primitiveCount++] = (Primitive){
                     vertOffset, 
                     triOffset, 
                     primTris, 
@@ -396,59 +395,98 @@ load_gltf_model(Arena *arena, const char* path)
     return model;
 }
 
-bool upload_model_to_gpu(VulkanEngine* engine, Model* model)
+bool upload_model_to_gpu(struct VulkanEngine* engine, Model* model)
 {
     if (model->mesh.vertCount == 0 || model->mesh.triCount == 0) {
         SDL_Log("No mesh data to upload");
         return false;
     }
 
-    // Calculate sizes
     VkDeviceSize vertexBufferSize = model->mesh.vertCount * sizeof(Vertex);
     VkDeviceSize indexBufferSize  = model->mesh.triCount * 3 * sizeof(uint32_t);
+    VkDeviceSize totalSize        = vertexBufferSize + indexBufferSize;
 
-    VkDeviceSize totalSize = vertexBufferSize + indexBufferSize;
-
+    // 1. Create the GPU buffer (in device local memory)
     VkBufferCreateInfo bufferCI = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size  = totalSize,
         .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | 
-                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT | 
-                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                 VK_BUFFER_USAGE_TRANSFER_DST_BIT
     };
 
-    VmaAllocationCreateInfo allocCI = {
-        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                 VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        .usage = VMA_MEMORY_USAGE_AUTO
+    VK_CHECK(vkCreateBuffer(engine->device, &bufferCI, NULL, &model->vertexBuffer));
+
+    VkMemoryRequirements reqs;
+    vkGetBufferMemoryRequirements(engine->device, model->vertexBuffer, &reqs);
+
+    Allocation gpuAlloc = arena_alloc(engine->deviceLocalArena, reqs.size, reqs.alignment);
+    if (!allocation_valid(gpuAlloc)) {
+        SDL_Log("ERROR: Out of device local memory for model!");
+        vkDestroyBuffer(engine->device, model->vertexBuffer, NULL);
+        return false;
+    }
+
+    VK_CHECK(vkBindBufferMemory(engine->device, model->vertexBuffer, 
+                                gpuAlloc.memory, gpuAlloc.offset));
+
+    model->vertexBufferOffset = gpuAlloc.offset;   // save for later use if needed
+
+    // 2. Create staging buffer and upload data
+    VkBuffer stagingBuffer;
+
+    VkBufferCreateInfo stagingCI = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size  = totalSize,
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
     };
 
-    VmaAllocationInfo allocInfo = {};
+    VK_CHECK(vkCreateBuffer(engine->device, &stagingCI, NULL, &stagingBuffer));
 
-    // Create buffer FOR THIS MODEL (not global engine->vBuffer)
-    VK_CHECK(vmaCreateBuffer(engine->allocator, &bufferCI, &allocCI,
-                             &model->vertexBuffer, 
-                             &model->vertexBufferAllocation, 
-                             &allocInfo));
+    Allocation stagingAlloc = arena_alloc(engine->stagingArena, totalSize, 16);
+    if (!allocation_valid(stagingAlloc)) {
+        SDL_Log("ERROR: Out of staging memory!");
+        vkDestroyBuffer(engine->device, stagingBuffer, NULL);
+        vkDestroyBuffer(engine->device, model->vertexBuffer, NULL);
+        return false;
+    }
 
-    // Upload data
-    void* mapped = allocInfo.pMappedData;
+    VK_CHECK(vkBindBufferMemory(engine->device, stagingBuffer, 
+                                stagingAlloc.memory, stagingAlloc.offset));
 
+    // Copy data to staging
+    void* mapped = (char*)engine->stagingArena->mapped + stagingAlloc.offset;
     memcpy(mapped, model->mesh.verts, vertexBufferSize);
     memcpy((char*)mapped + vertexBufferSize, model->mesh.tris, indexBufferSize);
 
-    // Save offsets and counts inside the model
+    // 3. Copy from staging → GPU buffer
+    VkCommandBuffer cmd = begin_single_time_commands(engine);
+
+    VkBufferCopy copyRegion = {
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size      = totalSize
+    };
+    vkCmdCopyBuffer(cmd, stagingBuffer, model->vertexBuffer, 1, &copyRegion);
+
+    end_single_time_commands(engine, cmd);
+
+    // Cleanup staging buffer
+    vkDestroyBuffer(engine->device, stagingBuffer, NULL);
+
+    // Save info in model
     model->vertexBufferSize = vertexBufferSize;
     model->indexBufferOffset = vertexBufferSize;
     model->indexCount = model->mesh.triCount * 3;
 
-    SDL_Log("Uploaded model: %d vertices, %d indices to GPU", 
+    SDL_Log("Uploaded model: %d verts, %d indices", 
             model->mesh.vertCount, model->indexCount);
 
     return true;
 }
 
-bool LoadFontAtlas(VulkanEngine* engine, FontAtlas* atlas)
+bool LoadFontAtlas(struct VulkanEngine* engine, FontAtlas* atlas)
 {
     if (!atlas) return false;
 
@@ -480,36 +518,29 @@ bool LoadFontAtlas(VulkanEngine* engine, FontAtlas* atlas)
         return false;
     }
 
-    stbtt_PackBegin(&packContext, atlasBitmap, atlasSize, atlasSize, 0, padding, nullptr);
+    stbtt_PackBegin(&packContext, atlasBitmap, atlasSize, atlasSize, 0, padding, NULL);
     stbtt_PackSetOversampling(&packContext, 2, 2);
-
-    // pack at higher resolution
     stbtt_PackFontRange(&packContext, fontData, 0, fontPixelHeight, 32, 96, packedChars);
     stbtt_PackEnd(&packContext);
 
-    // Get font vertical metrics (this is the proper way)
+    // Get font metrics
     int ascent, descent, lineGap;
     stbtt_GetFontVMetrics(&font, &ascent, &descent, &lineGap);
+    float scale = stbtt_ScaleForPixelHeight(&font, fontPixelHeight);
 
-    // Scale the metrics to our packed font size
-    float scale = stbtt_ScaleForPixelHeight(&font, fontPixelHeight);  // fontPixelHeight is your 48.0f
+    atlas->baseline = (float)ascent * scale;
 
-    atlas->baseline   = (float)ascent * scale;          // distance from baseline to top of tallest glyph
-    //atlas->lineHeight = (ascent - descent + lineGap) * scale;
-
-    SDL_Log("Font metrics - Ascent: %d, Descent: %d, Baseline (pixels): %.2f", 
-        ascent, descent, atlas->baseline);
+    SDL_Log("Font metrics - Ascent: %d, Descent: %d, Baseline: %.2f", ascent, descent, atlas->baseline);
 
     // Debug PNG
     stbi_write_png("font_atlas_debug.png", atlasSize, atlasSize, 1, atlasBitmap, atlasSize);
-    SDL_Log("Saved font_atlas_debug.png - open it and check for gaps between letters");
 
-    // Create R8 image
+    // ====================== CREATE FONT ATLAS IMAGE ======================
     VkImageCreateInfo imageCI = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
         .format = VK_FORMAT_R8_UNORM,
-        .extent = {(uint32_t)atlasSize, (uint32_t)atlasSize, 1},
+        .extent = { (uint32_t)atlasSize, (uint32_t)atlasSize, 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -518,64 +549,77 @@ bool LoadFontAtlas(VulkanEngine* engine, FontAtlas* atlas)
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
     };
 
-    VmaAllocationCreateInfo allocCI = {.usage = VMA_MEMORY_USAGE_GPU_ONLY};
-    if (vmaCreateImage(engine->allocator, &imageCI, &allocCI, &atlas->image, &atlas->allocation, nullptr) != VK_SUCCESS) {
-        SDL_Log("vmaCreateImage failed for font atlas");
+    VK_CHECK(vkCreateImage(engine->device, &imageCI, NULL, &atlas->image));
+
+    VkMemoryRequirements reqs;
+    vkGetImageMemoryRequirements(engine->device, atlas->image, &reqs);
+
+    Allocation alloc = arena_alloc(engine->deviceLocalArena, reqs.size, reqs.alignment);
+    if (!allocation_valid(alloc)) {
+        SDL_Log("ERROR: Out of memory for font atlas");
+        free(atlasBitmap);
+        SDL_free(fontData);
+        vkDestroyImage(engine->device, atlas->image, NULL);
+        return false;
+    }
+
+    VK_CHECK(vkBindImageMemory(engine->device, atlas->image, alloc.memory, alloc.offset));
+
+    // ====================== UPLOAD DATA (Staging) ======================
+    VkBuffer stagingBuffer;
+    VkDeviceSize bufferSize = (VkDeviceSize)atlasSize * atlasSize;
+
+    VkBufferCreateInfo stagingCI = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = bufferSize,
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    };
+
+    VK_CHECK(vkCreateBuffer(engine->device, &stagingCI, NULL, &stagingBuffer));
+
+    Allocation stagingAlloc = arena_alloc(engine->stagingArena, bufferSize, 16); // 16-byte alignment is safe
+
+    if (!allocation_valid(stagingAlloc)) {
+        SDL_Log("ERROR: Out of staging memory for font atlas");
+        vkDestroyBuffer(engine->device, stagingBuffer, NULL);
         free(atlasBitmap);
         SDL_free(fontData);
         return false;
     }
 
-    // === FULL UPLOAD (this was missing) ===
-    VkBuffer stagingBuffer;
-    VmaAllocation stagingAlloc;
-    VmaAllocationInfo stagingInfo;
+    VK_CHECK(vkBindBufferMemory(engine->device, stagingBuffer, stagingAlloc.memory, stagingAlloc.offset));
 
-    VkBufferCreateInfo stagingCI = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = (VkDeviceSize)atlasSize * atlasSize,
-        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
-    };
+    // Copy data to mapped memory
+    void* mapped = (char*)engine->stagingArena->mapped + stagingAlloc.offset;
+    memcpy(mapped, atlasBitmap, bufferSize);
 
-    VmaAllocationCreateInfo stagingAllocCI = {
-        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        .usage = VMA_MEMORY_USAGE_AUTO
-    };
-
-    vmaCreateBuffer(engine->allocator, &stagingCI, &stagingAllocCI, &stagingBuffer, &stagingAlloc, &stagingInfo);
-    memcpy(stagingInfo.pMappedData, atlasBitmap, atlasSize * atlasSize);
-
+    // ====================== COMMAND BUFFER UPLOAD ======================
     VkCommandBuffer cmd = begin_single_time_commands(engine);
 
-    // Barrier 1: UNDEFINED -> TRANSFER_DST_OPTIMAL
+    // Barrier: Undefined -> Transfer DST
     VkImageMemoryBarrier2 barrier1 = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-        .srcAccessMask = 0,
         .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
         .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
         .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         .image = atlas->image,
-        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1}
+        .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
     };
 
-    VkDependencyInfo dep1 = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &barrier1
-    };
+    VkDependencyInfo dep1 = { .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier1 };
     vkCmdPipelineBarrier2(cmd, &dep1);
 
     // Copy
     VkBufferImageCopy region = {
         .bufferOffset = 0,
-        .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .layerCount = 1},
-        .imageExtent = {(uint32_t)atlasSize, (uint32_t)atlasSize, 1}
+        .imageSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .layerCount = 1 },
+        .imageExtent = { (uint32_t)atlasSize, (uint32_t)atlasSize, 1 }
     };
     vkCmdCopyBufferToImage(cmd, stagingBuffer, atlas->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    // Barrier 2: TRANSFER_DST -> SHADER_READ_ONLY_OPTIMAL
+    // Barrier: Transfer DST -> Shader Read Only
     VkImageMemoryBarrier2 barrier2 = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -585,31 +629,27 @@ bool LoadFontAtlas(VulkanEngine* engine, FontAtlas* atlas)
         .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         .image = atlas->image,
-        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1}
+        .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
     };
 
-    VkDependencyInfo dep2 = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &barrier2
-    };
+    VkDependencyInfo dep2 = { .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier2 };
     vkCmdPipelineBarrier2(cmd, &dep2);
 
     end_single_time_commands(engine, cmd);
 
-    vmaDestroyBuffer(engine->allocator, stagingBuffer, stagingAlloc);
+    // Cleanup staging buffer
+    vkDestroyBuffer(engine->device, stagingBuffer, NULL);
 
-    // Create ImageView
+    // ====================== CREATE IMAGE VIEW & SAMPLER ======================
     VkImageViewCreateInfo viewCI = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = atlas->image,
         .viewType = VK_IMAGE_VIEW_TYPE_2D,
         .format = VK_FORMAT_R8_UNORM,
-        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1}
+        .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
     };
-    VK_CHECK(vkCreateImageView(engine->device, &viewCI, nullptr, &atlas->imageView));
+    VK_CHECK(vkCreateImageView(engine->device, &viewCI, NULL, &atlas->imageView));
 
-    // Create sampler
     VkSamplerCreateInfo samplerCI = {
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
         .magFilter = VK_FILTER_NEAREST,
@@ -618,10 +658,10 @@ bool LoadFontAtlas(VulkanEngine* engine, FontAtlas* atlas)
         .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
         .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
     };
-    VK_CHECK(vkCreateSampler(engine->device, &samplerCI, nullptr, &atlas->sampler));
+    VK_CHECK(vkCreateSampler(engine->device, &samplerCI, NULL, &atlas->sampler));
 
-    // Fill glyph data with inset
-    const float inset = 2.0f / (float)atlasSize;   // stronger inset
+    // Fill glyph data
+    const float inset = 2.0f / (float)atlasSize;
 
     for (int i = 32; i < 128; ++i) {
         stbtt_packedchar* pc = &packedChars[i - 32];
@@ -632,18 +672,18 @@ bool LoadFontAtlas(VulkanEngine* engine, FontAtlas* atlas)
         g->u1 = (pc->x1 - inset) / (float)atlasSize;
         g->v1 = (pc->y1 - inset) / (float)atlasSize;
 
-        g->width = pc->x1 - pc->x0;
+        g->width  = pc->x1 - pc->x0;
         g->height = pc->y1 - pc->y0;
-
-        g->xoff  = pc->xoff;
-        g->yoff  = pc->yoff;
-        g->xoff2 = pc->xoff2;
-        g->yoff2 = pc->yoff2;
+        g->xoff   = pc->xoff;
+        g->yoff   = pc->yoff;
+        g->xoff2  = pc->xoff2;
+        g->yoff2  = pc->yoff2;
     }
 
     atlas->atlasWidth = atlasSize;
     atlas->atlasHeight = atlasSize;
 
+    // Cleanup CPU memory
     SDL_free(fontData);
     free(atlasBitmap);
 

@@ -1,10 +1,11 @@
 #pragma once
 
 #include <math.h>
+#include <stdio.h>
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_enum_string_helper.h>
-#include "vk_mem_alloc.h"
+//#include "vk_mem_alloc.h"
 
 #include "HandmadeMath.h"
 #include "SDL3/SDL.h"
@@ -21,13 +22,11 @@
 #define MAX_ATTRIBUTES 16
 
 
-/*
 #ifdef DEBUG
 #define assert(Expression) if(!(Expression)) {*(int *)0 = 0;}
 #else
 #define assert(Expression)
 #endif
-*/
 
 #define VK_CHECK(x)                                                     \
     do {                                                                \
@@ -41,9 +40,8 @@
 typedef struct AllocatedImage
 {
     VkImage image;
-    VkImageView imageView ;
-    VmaAllocation allocation;
-
+    VkImageView imageView;
+    VkDeviceSize offset;
     VkExtent3D imageExtent;
     VkFormat imageFormat;
 } AllocatedImage;
@@ -51,8 +49,6 @@ typedef struct AllocatedImage
 typedef struct AllocatedBuffer
 {
     VkBuffer buffer;
-    VmaAllocation allocation;
-    VmaAllocationInfo info;
 } AllocatedBuffer;
 
 typedef struct VertexInputDescription
@@ -83,15 +79,7 @@ typedef struct Vertex
 
 } Vertex;
 
-static VertexInputDescription get_vertex_description();
-
-// holds the resources needed for a mesh
-typedef struct GPUMeshBuffers
-{
-    AllocatedBuffer indexBuffer;
-    AllocatedBuffer vertexBuffer;
-    VkDeviceAddress vertexBufferAddress;
-} GPUMeshBuffers;
+VertexInputDescription get_vertex_description();
 
 // push constants for our mesh object draws
 typedef struct GPUDrawPushConstants

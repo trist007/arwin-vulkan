@@ -6,13 +6,17 @@
 typedef struct DeviceInformation
 {
     char name[256];
+
     uint32_t queueFamilyIndex;
+
     bool hasDynamicRendering;
     bool hasSynchronization2;
     bool hasKhrDescriptorIndexing;
     bool hasExtDescriptorIndexing;
     bool hasShaderDrawParameters;
     bool hasExtendedDynamicState;
+
+    VkPhysicalDeviceMemoryProperties memoryProperties;
 } DeviceInformation;
 
 uint32_t enableExtCount(struct DeviceInformation *deviceInfo);
@@ -21,3 +25,4 @@ bool createLogicalDevice(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIn
 bool mincreateLogicalDevice(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, VkDevice *outDevice, uint32_t numExt, struct DeviceInformation *deviceInfo);
 void getVulkanInstanceVersion();
 int evalDevice(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevice device, DeviceInformation *deviceInfo);
+uint32_t find_memory_type(VkPhysicalDevice physicalDevice, uint32_t memoryTypeBits, VkMemoryPropertyFlags requiredFlags, VkMemoryPropertyFlags preferredFlags);

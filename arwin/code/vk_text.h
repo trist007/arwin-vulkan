@@ -26,7 +26,6 @@ typedef struct FontAtlas
 {
     VkImage image;
     VkImageView imageView;
-    VmaAllocation allocation;
     VkSampler sampler;
 
     int atlasWidth;

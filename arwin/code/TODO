@@ -7,6 +7,61 @@ convert to custom memory manager to replace vma
 get VkPhysicalDeviceMemoryProperties to better optimize custom memory manager
 see what to do about slang since its C++
 
+Memory Types
+
+1. Device Local Arena (deviceLocalArena)
+Memory Type Flags: VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+
+This is GPU-only memory (VRAM).
+
+The GPU can read/write to it extremely fast.
+
+The CPU cannot efficiently access it (mapping it is slow or not allowed on many GPUs).
+
+This is where you want most of your permanent resources:
+
+Vertex buffers
+Index buffers
+Texture images
+Depth buffers
+Offscreen render targets (drawImage, etc.)
+
+Think of it as: "Fast storage for things the GPU uses every frame."
+
+2. Staging Arena (stagingArena)
+Memory Type Flags: VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT (ideally also HOST_CACHED)
+
+This memory is visible to the CPU.
+
+You can safely vkMapMemory() it and write data from the CPU.
+
+The GPU can read from it, but it's much slower than device-local memory.
+
+Used as a temporary bridge to get data from CPU → GPU.
+
+Typical workflow:
+
+Create a small buffer in Staging Arena
+Map it → memcpy your vertices/textures/data into it
+Copy from staging buffer → device-local buffer using vkCmdCopyBuffer
+(Optional) Destroy or reuse the staging buffer
+
+Think of it as: "The upload highway from CPU to GPU."Real-World AnalogyDevice Local = SSD inside your graphics card (very fast for GPU, hard for CPU to touch)
+Staging = Regular system RAM (easy for CPU to write to, but slow if GPU tries to use it directly every frame)
+
+How You Will Use Them in Practicec
+
+// For static models, textures, etc.
+Allocation alloc = arena_alloc(&engine->deviceLocalArena, reqs.size, reqs.alignment);
+
+// For uniform buffers or temporary staging
+Allocation alloc = arena_alloc(&engine->stagingArena, reqs.size, reqs.alignment);
+
+Rule of thumb:If the resource is read by the GPU a lot → deviceLocalArena
+If the resource is written by the CPU often → stagingArena
+
+=========================================================================================
+
 1. Minor / Style IssuesLots of magic numbers (FRAME_OVERLAP, MAX_SWAPCHAIN_IMAGES, etc.) — define them clearly.
 Some functions take GameState* but don’t always need it.
 destroyVulkanEngine is called howtoCleanupVulkanEngine — rename.
@@ -327,3 +382,5 @@ One shared shader + pipeline for 3D models
 Separate resources for text rendering
 
 That’s why both models can use the exact same shader and descriptor set — they are designed to share those resources.
+
+vulkan/vulkan.h includes windows.h

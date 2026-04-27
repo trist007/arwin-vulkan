@@ -42,7 +42,7 @@ typedef struct Allocation
     // ! can add generation ID for safety
 } Allocation;
 
-VkResult createVkArena(VkDevice device, uint32_t memoryTypeIndex, VkDeviceSize size, struct vkArena *arena);
+VkResult createVkArena(VkPhysicalDevice chosenGPU, VkDevice device, uint32_t memoryTypeIndex, VkDeviceSize size, struct vkArena *arena);
 Allocation arena_alloc(struct vkArena *arena, VkDeviceSize size, VkDeviceSize alignment);
 bool allocation_valid(struct Allocation a);
 

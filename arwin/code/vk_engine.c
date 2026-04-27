@@ -59,8 +59,8 @@ void initVulkanEngine(struct VulkanEngine *engine, GameState *gameState)
     engine->isInitialized = true;
 
     // Set camera parameters
-    engine->mainCamera.velocity = {0.0f, 0.0f, 0.0f};
-    engine->mainCamera.position = {0.0f, 0.0f, 5.0f};
+    engine->mainCamera.velocity = (HMM_Vec3){0.0f, 0.0f, 0.0f};
+    engine->mainCamera.position = (HMM_Vec3){0.0f, 0.0f, 5.0f};
 
     engine->mainCamera.pitch = 0;
     engine->mainCamera.yaw = 0;
@@ -80,9 +80,9 @@ void init_vulkan(struct VulkanEngine *engine) {
             VK_VERSION_MAJOR(instanceVersion), VK_VERSION_MINOR(instanceVersion),
             VK_VERSION_PATCH(instanceVersion));
 
-    uint32_t instanceExtensionsCount{0};
-    const char *const *newinstanceExtensions{
-        SDL_Vulkan_GetInstanceExtensions(&instanceExtensionsCount)};
+    uint32_t instanceExtensionsCount = 0;
+    const char *const *newinstanceExtensions = 
+        SDL_Vulkan_GetInstanceExtensions(&instanceExtensionsCount);
 
     uint32_t enabledLayerCount = 0;
     const char *enabledLayers[1] = {"VK_LAYER_KHRONOS_validation"};
@@ -190,6 +190,7 @@ void init_vulkan(struct VulkanEngine *engine) {
     SDL_Log("Vulkan initialization completed successfully!");
     SDL_Log("Graphics Queue Family Index: %u", bestQueueFamily);
 
+    /*
     // initialize the memory allocator
     VmaAllocatorCreateInfo allocatorInfo = {};
     allocatorInfo.physicalDevice = engine->chosenGPU;
@@ -197,12 +198,39 @@ void init_vulkan(struct VulkanEngine *engine) {
     allocatorInfo.instance = engine->instance;
     allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
     vmaCreateAllocator(&allocatorInfo, &engine->allocator);
+    */
+
+    // ====================  MANUAL ARENA INITIALIZATION  ====================
+    SDL_Log("Creating custom memory arenas...");
+
+    // Device Local Arena (GPU VRAM) - for most permanent resources
+    uint32_t deviceLocalType = find_memory_type(engine->chosenGPU,
+        0xFFFFFFFF,                                 // accept any memoryTypeBits for now
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
+
+    if (deviceLocalType != UINT32_MAX) {
+        VkResult res = createVkArena(engine->chosenGPU, engine->device, deviceLocalType,
+                                    512ULL * 1024 * 1024,   // 512 MB
+                                    engine->deviceLocalArena);
+        if (res == VK_SUCCESS)
+            SDL_Log("✓ DeviceLocal Arena created (type %u)", deviceLocalType);
+    }
+
+    // Staging Arena (Host Visible) - for uploading data
+    uint32_t stagingType = find_memory_type(engine->chosenGPU,
+        0xFFFFFFFF,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+    VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+
+    if (stagingType != UINT32_MAX) {
+        VkResult res = createVkArena(engine->chosenGPU, engine->device, stagingType,
+                                    128ULL * 1024 * 1024,   // 128 MB
+                                    engine->stagingArena);
+        if (res == VK_SUCCESS)
+            SDL_Log("✓ Staging Arena created (type %u)", stagingType);
+    }
 
     deletion_queue_init(&engine->mainDeletionQueue);
-
-    deletion_queue_push(&engine->mainDeletionQueue, 
-                    (DeletionFunc)vmaDestroyAllocator, 
-                    engine->allocator);   // userdata = allocator
 
     // ! NOTE: trist007: [&]() is the lambda [&] is capture by reference which for
     // a deletion queue ! can be dangerous if the variable goes out of scope
@@ -214,84 +242,38 @@ void init_vulkan(struct VulkanEngine *engine) {
     */
 }
 
-void init_swapchain(struct VulkanEngine *engine) {
-  create_swapchain(engine, engine->windowExtent.width,
-                   engine->windowExtent.height);
+void init_swapchain(struct VulkanEngine *engine)
+{
+    create_swapchain(engine, engine->windowExtent.width,
+                    engine->windowExtent.height);
 
-  VkExtent3D drawImageExtent = {engine->windowExtent.width,
-                                engine->windowExtent.height, 1};
+    VkExtent3D drawImageExtent = {engine->windowExtent.width,
+                                    engine->windowExtent.height, 1};
 
-  engine->drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-  engine->drawImage.imageExtent = drawImageExtent;
+    engine->drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+    engine->drawImage.imageExtent = drawImageExtent;
 
-  VkImageUsageFlags drawImageUsages = 0;
-  drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-  drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-  drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
-  drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    VkImageUsageFlags drawImageUsages = 0;
+    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-  VkImageCreateInfo rimg_info = image_create_info(
-      engine->drawImage.imageFormat, drawImageUsages, drawImageExtent);
+    engine->drawImage = create_image(engine, drawImageExtent,
+                                     engine->drawImage.imageFormat,
+                                     drawImageUsages, false);
 
-  VmaAllocationCreateInfo rimg_allocinfo = {};
-  // ! NOTE: trist007: In vulkan, there are multiple memory regions we can
-  // allocate images and buffers from. ! PC implementations with dedicated GPUs
-  // will generally have a cpu ram region, a GPU Vram region, and a “upload
-  // heap” ! which is a special region of gpu vram that allows cpu writes. If
-  // you have resizable bar enabled, the upload heap can ! be the entire gpu
-  // vram. Else it will be much smaller, generally only 256 megabytes. We tell
-  // VMA to put it on GPU_ONLY ! which will prioritize it to be on the gpu vram
-  // but outside of that upload heap region.
-  rimg_allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-  rimg_allocinfo.requiredFlags =
-      VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    // ====================== DEPTH IMAGE ======================
+    engine->depthImage.imageFormat = VK_FORMAT_D32_SFLOAT;
+    engine->depthImage.imageExtent = drawImageExtent;
 
-  vmaCreateImage(engine->allocator, &rimg_info, &rimg_allocinfo,
-                 &engine->drawImage.image, &engine->drawImage.allocation,
-                 NULL);
+    VkImageUsageFlags depthImageUsages = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 
-  VkImageViewCreateInfo rview_info = vkinit::imageview_create_info(
-      engine->drawImage.imageFormat, engine->drawImage.image,
-      VK_IMAGE_ASPECT_COLOR_BIT);
+    engine->depthImage = create_image(engine, drawImageExtent,
+                                      engine->depthImage.imageFormat,
+                                      depthImageUsages, false);
 
-  VK_CHECK(vkCreateImageView(engine->device, &rview_info, NULL,
-                             &engine->drawImage.imageView));
-
-  deletion_queue_push_allocated_image(&engine->mainDeletionQueue,
-                                engine->device,
-                                engine->drawImage.imageView,
-                                engine->allocator,
-                                engine->drawImage.image,
-                                engine->drawImage.allocation);
-
-  engine->depthImage.imageFormat = VK_FORMAT_D32_SFLOAT;
-  engine->depthImage.imageExtent = drawImageExtent;
-  VkImageUsageFlags depthImageUsages{};
-  depthImageUsages |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-
-  VkImageCreateInfo dimg_info = image_create_info(
-      engine->depthImage.imageFormat, depthImageUsages, drawImageExtent);
-
-  // allocate and create the image
-  vmaCreateImage(engine->allocator, &dimg_info, &rimg_allocinfo,
-                 &engine->depthImage.image, &engine->depthImage.allocation,
-                 NULL);
-
-  // build a image-view for the draw image to use for rendering
-  VkImageViewCreateInfo dview_info = vkinit::imageview_create_info(
-      engine->depthImage.imageFormat, engine->depthImage.image,
-      VK_IMAGE_ASPECT_DEPTH_BIT);
-
-  VK_CHECK(vkCreateImageView(engine->device, &dview_info, NULL,
-                             &engine->depthImage.imageView));
-
-  deletion_queue_push_allocated_image(&engine->mainDeletionQueue,
-                                engine->device,
-                                engine->drawImage.imageView,
-                                engine->allocator,
-                                engine->drawImage.image,
-                                engine->drawImage.allocation);
-
+    SDL_Log("Swapchain and render targets created successfully");
 }
 
 void create_swapchain(struct VulkanEngine *engine, uint32_t width, uint32_t height)
@@ -379,8 +361,9 @@ void create_swapchain(struct VulkanEngine *engine, uint32_t width, uint32_t heig
     engine->depthFormat = VK_FORMAT_UNDEFINED;
 
     for (int32_t i = 0; i < MAX_DEPTH_FORMATS; i++) {
-        VkFormatProperties2 props{
+        VkFormatProperties2 props = {
             .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2};
+
         vkGetPhysicalDeviceFormatProperties2(engine->chosenGPU, depthFormatList[i], &props);
 
         if (props.formatProperties.optimalTilingFeatures &
@@ -450,9 +433,9 @@ void howtoCleanupVulkanEngine(struct VulkanEngine *engine)
 
         // Shader data buffer
         if (engine->frames[i].shaderDataBuffers.buffer != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(engine->allocator, 
-                             engine->frames[i].shaderDataBuffers.buffer, 
-                             engine->frames[i].shaderDataBuffers.allocation);
+            vkDestroyBuffer(engine->device, 
+                engine->frames[i].shaderDataBuffers.buffer, 
+                NULL);
             engine->frames[i].shaderDataBuffers.buffer = VK_NULL_HANDLE;
         }
     }
@@ -479,12 +462,17 @@ void howtoCleanupVulkanEngine(struct VulkanEngine *engine)
 
     // 5. Main geometry buffer
     if (engine->vBuffer != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(engine->allocator, engine->vBuffer, engine->vBufferAllocation);
+        vkDestroyBuffer(engine->device, engine->vBuffer, NULL);
+
         engine->vBuffer = VK_NULL_HANDLE;
     }
 
     // 6. Textures
-    for (uint32_t i = 0; i < engine->textureCount; i++) {
+    for (uint32_t i = 0; i < engine->textureCount; i++)
+    {
+        destroy_texture(engine, &engine->textures[i]);
+        engine->textureCount = 0;
+        /*
         if (engine->textures[i].view != VK_NULL_HANDLE)
             vkDestroyImageView(engine->device, engine->textures[i].view, NULL);
 
@@ -492,21 +480,17 @@ void howtoCleanupVulkanEngine(struct VulkanEngine *engine)
             vkDestroySampler(engine->device, engine->textures[i].sampler, NULL);
 
         if (engine->textures[i].image != VK_NULL_HANDLE)
-            vmaDestroyImage(engine->allocator, engine->textures[i].image, engine->textures[i].allocation);
+            destroy_texture(engine, engine->textures[i].image);
+            */
     }
 
     // 7. Offscreen images
-    if (engine->drawImage.imageView != VK_NULL_HANDLE)
-        vkDestroyImageView(engine->device, engine->drawImage.imageView, NULL);
-
     if (engine->drawImage.image != VK_NULL_HANDLE)
-        vmaDestroyImage(engine->allocator, engine->drawImage.image, engine->drawImage.allocation);
+        destroy_image(engine, &engine->drawImage);
 
-    if (engine->depthImage.imageView != VK_NULL_HANDLE)
-        vkDestroyImageView(engine->device, engine->depthImage.imageView, NULL);
+    if (engine->depthImage.image!= VK_NULL_HANDLE)
+        destroy_image(engine, &engine->depthImage);
 
-    if (engine->depthImage.image != VK_NULL_HANDLE)
-        vmaDestroyImage(engine->allocator, engine->depthImage.image, engine->depthImage.allocation);
 
     // 8. Swapchain
     destroy_swapchain(engine);
@@ -514,9 +498,6 @@ void howtoCleanupVulkanEngine(struct VulkanEngine *engine)
     // 9. Final objects
     if (engine->surface != VK_NULL_HANDLE)
         vkDestroySurfaceKHR(engine->instance, engine->surface, NULL);
-
-    if (engine->allocator != VK_NULL_HANDLE)
-        vmaDestroyAllocator(engine->allocator);
 
     if (engine->device != VK_NULL_HANDLE)
         vkDestroyDevice(engine->device, NULL);
@@ -556,7 +537,7 @@ void runVulkanEngine(struct VulkanEngine *engine, GameState *gamestate) {
         engine->stop_rendering = false;
 
       // send SDL event to camera and imgui for handling
-      engine->mainCamera.processSDLEvent(e, gamestate);
+      processSDLEvent(&e, &engine->mainCamera);
       //ImGui_ImplSDL3_ProcessEvent(&e);
     }
 
@@ -578,20 +559,20 @@ void runVulkanEngine(struct VulkanEngine *engine, GameState *gamestate) {
     // make imgui calculate internal draw structures
     //ImGui::Render();
 
-    mainRenderLoop(engine, gameState);
+    mainRenderLoop(engine, gamestate);
   }
 }
 
-FrameData *getCurrentFrame(struct VulkanEngine *engine) {
+struct FrameData *getCurrentFrame(struct VulkanEngine *engine) {
   return &engine->frames[engine->frameIndex % FRAME_OVERLAP];
 }
 
-VertexInputDescription Vertex::get_vertex_description()
+VertexInputDescription get_vertex_description()
 {
-    VertexInputDescription description = {};
+    VertexInputDescription description = {0};
 
     // === Binding 0 ===
-    description.bindings[0] = {
+    description.bindings[0] = (VkVertexInputBindingDescription){
         .binding   = 0,
         .stride    = sizeof(Vertex),
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
@@ -602,7 +583,7 @@ VertexInputDescription Vertex::get_vertex_description()
     uint32_t loc = 0;
 
     // Location 0: Position
-    description.attributes[loc++] = {
+    description.attributes[loc++] = (VkVertexInputAttributeDescription){
         .location = 0,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32B32_SFLOAT,
@@ -610,7 +591,7 @@ VertexInputDescription Vertex::get_vertex_description()
     };
 
     // Location 1: Normal
-    description.attributes[loc++] = {
+    description.attributes[loc++] = (VkVertexInputAttributeDescription){
         .location = 1,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32B32_SFLOAT,
@@ -618,7 +599,7 @@ VertexInputDescription Vertex::get_vertex_description()
     };
 
     // Location 2: Texcoord
-    description.attributes[loc++] = {
+    description.attributes[loc++] = (VkVertexInputAttributeDescription){
         .location = 2,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32_SFLOAT,
@@ -626,7 +607,7 @@ VertexInputDescription Vertex::get_vertex_description()
     };
 
     // Location 3: Color
-    description.attributes[loc++] = {
+    description.attributes[loc++] = (VkVertexInputAttributeDescription){
         .location = 3,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
@@ -634,7 +615,7 @@ VertexInputDescription Vertex::get_vertex_description()
     };
 
     // Location 4: Joints (uint8x4)
-    description.attributes[loc++] = {
+    description.attributes[loc++] = (VkVertexInputAttributeDescription){
         .location = 4,
         .binding  = 0,
         .format   = VK_FORMAT_R8G8B8A8_UINT,
@@ -642,7 +623,7 @@ VertexInputDescription Vertex::get_vertex_description()
     };
 
     // Location 5: Weights
-    description.attributes[loc++] = {
+    description.attributes[loc++] = (VkVertexInputAttributeDescription){
         .location = 5,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
@@ -658,7 +639,8 @@ void
 mainRenderLoop(struct VulkanEngine *engine, GameState *gameState)
 {
     // Get current frame
-    FrameData &currentFrame = engine->frames[engine->frameIndex];
+    //struct FrameData *currentFrame = &engine->frames[engine->frameIndex];
+    struct FrameData *currentFrame = getCurrentFrame(engine);
 
     // 1. Update all shader data (CPU → GPU)
     update_shader_data(engine, gameState);
@@ -669,7 +651,7 @@ mainRenderLoop(struct VulkanEngine *engine, GameState *gameState)
     // Early out if resize was requested
     if (engine->resize_requested) return;
 
-    VkCommandBuffer cmd = currentFrame.commandBuffer;
+    VkCommandBuffer cmd = currentFrame->commandBuffer;
 
     VK_CHECK(vkResetCommandBuffer(cmd, 0));
 
@@ -724,15 +706,11 @@ resize_swapchain(struct VulkanEngine *engine)
     destroy_swapchain(engine);
 
         // Destroy offscreen images
-    if (engine->drawImage.imageView != VK_NULL_HANDLE)
-        vkDestroyImageView(engine->device, engine->drawImage.imageView, NULL);
     if (engine->drawImage.image != VK_NULL_HANDLE)
-        vmaDestroyImage(engine->allocator, engine->drawImage.image, engine->drawImage.allocation);
+        destroy_image(engine, &engine->drawImage);
 
-    if (engine->depthImage.imageView != VK_NULL_HANDLE)
-        vkDestroyImageView(engine->device, engine->depthImage.imageView, NULL);
     if (engine->depthImage.image != VK_NULL_HANDLE)
-        vmaDestroyImage(engine->allocator, engine->depthImage.image, engine->depthImage.allocation);
+        destroy_image(engine, &engine->depthImage);
 
     // Get new window size
     int w, h;
@@ -766,40 +744,61 @@ resize_swapchain(struct VulkanEngine *engine)
     SDL_Log("Swapchain and render targets resized to %ux%u", w, h);
 }
 
-AllocatedImage create_image(struct VulkanEngine* engine, VkExtent3D size,
-                            VkFormat format, VkImageUsageFlags usage,
+AllocatedImage create_image(struct VulkanEngine* engine, 
+                            VkExtent3D size,
+                            VkFormat format, 
+                            VkImageUsageFlags usage,
                             bool mipmapped)
 {
-    AllocatedImage newImage{};
-    newImage.imageFormat = format;
-    newImage.imageExtent = size;
+    AllocatedImage img = {0};
 
-    VkImageCreateInfo img_info = image_create_info(format, usage, size);
+    img.imageFormat = format;
+    img.imageExtent = size;
 
+    // Create Image
+    VkImageCreateInfo img_info = {
+        .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType     = VK_IMAGE_TYPE_2D,
+        .format        = format,
+        .extent        = size,
+        .mipLevels     = 1,
+        .arrayLayers   = 1,
+        .samples       = VK_SAMPLE_COUNT_1_BIT,
+        .tiling        = VK_IMAGE_TILING_OPTIMAL,
+        .usage         = usage,
+        .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
 
     if (mipmapped)
     {
         uint32_t maxDimension = MAX(size.width, size.height);
-
-        if(maxDimension == 0)
-        {
-            img_info.mipLevels = 1;
-        }
-        else
+        if (maxDimension > 0)
         {
             double logValue = log2((double)maxDimension);
             img_info.mipLevels = (uint32_t)floor(logValue) + 1;
         }
     }
 
-    VmaAllocationCreateInfo allocInfo = {};
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    VK_CHECK(vkCreateImage(engine->device, &img_info, NULL, &img.image));
 
-    VK_CHECK(vmaCreateImage(engine->allocator, &img_info, &allocInfo,
-                            &newImage.image, &newImage.allocation, NULL));
+    // Get memory requirements
+    VkMemoryRequirements reqs;
+    vkGetImageMemoryRequirements(engine->device, img.image, &reqs);
 
-    // Choose correct aspect flag
+    // Allocate from arena
+    Allocation alloc = arena_alloc(engine->deviceLocalArena, reqs.size, reqs.alignment);
+
+    if (!allocation_valid(alloc))
+    {
+        SDL_Log("ERROR: Out of memory in deviceLocalArena for image!");
+        abort();
+    }
+
+    VK_CHECK(vkBindImageMemory(engine->device, img.image, alloc.memory, alloc.offset));
+    img.offset = alloc.offset;
+
+    // === Create Image View (Pure C) ===
     VkImageAspectFlags aspectFlag = VK_IMAGE_ASPECT_COLOR_BIT;
     if (format == VK_FORMAT_D32_SFLOAT ||
         format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
@@ -808,20 +807,56 @@ AllocatedImage create_image(struct VulkanEngine* engine, VkExtent3D size,
         aspectFlag = VK_IMAGE_ASPECT_DEPTH_BIT;
     }
 
-    VkImageViewCreateInfo view_info = vkinit::imageview_create_info(
-        format, newImage.image, aspectFlag);
+    VkImageViewCreateInfo view_info = {
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image            = img.image,
+        .viewType         = VK_IMAGE_VIEW_TYPE_2D,
+        .format           = format,
+        .components       = {
+            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .a = VK_COMPONENT_SWIZZLE_IDENTITY
+        },
+        .subresourceRange = {
+            .aspectMask     = aspectFlag,
+            .baseMipLevel   = 0,
+            .levelCount     = img_info.mipLevels,
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        }
+    };
 
-    view_info.subresourceRange.levelCount = img_info.mipLevels;
+    VK_CHECK(vkCreateImageView(engine->device, &view_info, NULL, &img.imageView));
 
-    VK_CHECK(vkCreateImageView(engine->device, &view_info, NULL,
-                               &newImage.imageView));
+    // Push to deletion queue
+    deletion_queue_push_image(&engine->mainDeletionQueue, 
+                              engine->device, 
+                              img.imageView, 
+                              img.image);
 
-    return newImage;
+    return img;
 }
 
-void destroy_image(struct VulkanEngine *engine, const AllocatedImage &img) {
-  vkDestroyImageView(engine->device, img.imageView, NULL);
-  vmaDestroyImage(engine->allocator, img.image, img.allocation);
+void destroy_image(struct VulkanEngine *engine, AllocatedImage *img)
+{
+    if (img == NULL) return;
+
+    if (img->imageView != VK_NULL_HANDLE)
+    {
+        vkDestroyImageView(engine->device, img->imageView, NULL);
+        img->imageView = VK_NULL_HANDLE;
+    }
+
+    if (img->image != VK_NULL_HANDLE)
+    {
+        vkDestroyImage(engine->device, img->image, NULL);
+        img->image = VK_NULL_HANDLE;
+    }
+
+    // IMPORTANT: Do NOT free memory here!
+    // The memory stays in the arena and is cleaned up at the end
+    img->offset = 0;
 }
 
 void RenderText(struct VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atlas,
@@ -867,13 +902,13 @@ void RenderText(struct VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atl
         float u0 = g->u0, v0 = g->v1;
         float u1 = g->u1, v1 = g->v0;
 
-        verts[vertCount++] = TextVertex{{ndc_x0, ndc_y0}, {u0, v0}};
-        verts[vertCount++] = TextVertex{{ndc_x1, ndc_y0}, {u1, v0}};
-        verts[vertCount++] = TextVertex{{ndc_x0, ndc_y1}, {u0, v1}};
+        verts[vertCount++] = (TextVertex){{ndc_x0, ndc_y0}, {u0, v0}};
+        verts[vertCount++] = (TextVertex){{ndc_x1, ndc_y0}, {u1, v0}};
+        verts[vertCount++] = (TextVertex){{ndc_x0, ndc_y1}, {u0, v1}};
 
-        verts[vertCount++] = TextVertex{{ndc_x1, ndc_y0}, {u1, v0}};
-        verts[vertCount++] = TextVertex{{ndc_x1, ndc_y1}, {u1, v1}};
-        verts[vertCount++] = TextVertex{{ndc_x0, ndc_y1}, {u0, v1}};
+        verts[vertCount++] = (TextVertex){{ndc_x1, ndc_y0}, {u1, v0}};
+        verts[vertCount++] = (TextVertex){{ndc_x1, ndc_y1}, {u1, v1}};
+        verts[vertCount++] = (TextVertex){{ndc_x0, ndc_y1}, {u0, v1}};
 
         cursorX += g->width + 6.0f;
     }
@@ -885,11 +920,10 @@ void RenderText(struct VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atl
     vkCmdPushConstants(cmd, engine->textPipelineLayout, 
                        VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
 
-    // ====================== ONE STAGING BUFFER PER FRAME ======================
-    // Create buffer on first text call this frame
+    // ====================== STAGING BUFFER (using your arena) ======================
     if (engine->textStagingBuffer == VK_NULL_HANDLE)
     {
-        VkDeviceSize bufferSize = 1024 * 6 * sizeof(TextVertex); // enough for ~1000 characters
+        VkDeviceSize bufferSize = 1024 * 6 * sizeof(TextVertex); // ~1000 characters
 
         VkBufferCreateInfo ci = {
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -897,30 +931,34 @@ void RenderText(struct VulkanEngine* engine, VkCommandBuffer cmd, FontAtlas* atl
             .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
         };
 
-        VmaAllocationCreateInfo allocCI = {
-            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
-                     VMA_ALLOCATION_CREATE_MAPPED_BIT,
-            .usage = VMA_MEMORY_USAGE_AUTO
-        };
+        VK_CHECK(vkCreateBuffer(engine->device, &ci, NULL, &engine->textStagingBuffer));
 
-        VK_CHECK(vmaCreateBuffer(engine->allocator, &ci, &allocCI,
-                                 &engine->textStagingBuffer, 
-                                 &engine->textStagingAlloc, NULL));
+        Allocation alloc = arena_alloc(engine->stagingArena, bufferSize, 16);
+        if (!allocation_valid(alloc)) {
+            SDL_Log("ERROR: Out of staging memory for text!");
+            return;
+        }
+
+        VK_CHECK(vkBindBufferMemory(engine->device, engine->textStagingBuffer, 
+                                    alloc.memory, alloc.offset));
+
+        engine->textStagingOffset = alloc.offset;
     }
 
-    // Append vertices
-    void* mapped;
-    vmaMapMemory(engine->allocator, engine->textStagingAlloc, &mapped);
+    // Append vertices directly into persistently mapped arena
+    void* mapped = (char*)engine->stagingArena->mapped + engine->textStagingOffset;
     TextVertex* dst = (TextVertex*)mapped + engine->textVertexCountThisFrame;
-    memcpy(dst, verts, vertCount * sizeof(TextVertex));
-    vmaUnmapMemory(engine->allocator, engine->textStagingAlloc);
 
-    // Draw from the right offset
-    VkDeviceSize offset = engine->textVertexCountThisFrame * sizeof(TextVertex);
+    memcpy(dst, verts, vertCount * sizeof(TextVertex));
+
+    // Draw
+    VkDeviceSize offset = (engine->textVertexCountThisFrame * sizeof(TextVertex)) 
+                        + engine->textStagingOffset;
+
     vkCmdBindVertexBuffers(cmd, 0, 1, &engine->textStagingBuffer, &offset);
     vkCmdDraw(cmd, vertCount, 1, 0, 0);
 
-    // Update count for next text call this frame
+    // Update count for next text this frame
     engine->textVertexCountThisFrame += vertCount;
 }
 
@@ -962,75 +1000,103 @@ load_and_upload_gltf_models(struct VulkanEngine *engine, GameState *gameState)
     return true;
 }
 
-bool
-create_per_frame_uniform_buffers(struct VulkanEngine *engine)
+bool create_per_frame_uniform_buffers(struct VulkanEngine *engine)
 {
-    for (uint32_t i = 0; i < FRAME_OVERLAP; i++) {
-        VkBufferCreateInfo uBufferCI{
+    for (uint32_t i = 0; i < FRAME_OVERLAP; i++) 
+    {
+        // Create the buffer object
+        VkBufferCreateInfo uBufferCI = {
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .size = sizeof(ShaderData),
-            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
-        };
-        VmaAllocationCreateInfo uBufferAllocCI{
-            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-            .usage = VMA_MEMORY_USAGE_AUTO
+            .size  = sizeof(struct ShaderData),
+            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | 
+                     VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
         };
 
-        VK_CHECK(vmaCreateBuffer(engine->allocator, &uBufferCI, &uBufferAllocCI,
-            &engine->frames[i].shaderDataBuffers.buffer,
-            &engine->frames[i].shaderDataBuffers.allocation,
-            &engine->frames[i].shaderDataBuffers.allocationInfo));
+        VK_CHECK(vkCreateBuffer(engine->device, &uBufferCI, NULL,
+                                &engine->frames[i].shaderDataBuffers.buffer));
 
-        VkBufferDeviceAddressInfo uBufferBdaInfo{
-            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-            .buffer = engine->frames[i].shaderDataBuffers.buffer
+        // Get memory requirements
+        VkMemoryRequirements reqs;
+        vkGetBufferMemoryRequirements(engine->device, 
+                                      engine->frames[i].shaderDataBuffers.buffer, 
+                                      &reqs);
+
+        // Use staging arena (host visible + coherent)
+        Allocation alloc = arena_alloc(engine->stagingArena, reqs.size, reqs.alignment);
+
+        if (!allocation_valid(alloc)) {
+            SDL_Log("ERROR: Out of staging memory for uniform buffer!");
+            return false;
+        }
+
+        VK_CHECK(vkBindBufferMemory(engine->device, 
+                                    engine->frames[i].shaderDataBuffers.buffer,
+                                    alloc.memory, 
+                                    alloc.offset));
+
+        // Store offset for later use
+        engine->frames[i].shaderDataBuffers.offset = alloc.offset;
+
+        // Get device address (needed for shader)
+        VkBufferDeviceAddressInfo uBufferBdaInfo = {
+            .sType   = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer  = engine->frames[i].shaderDataBuffers.buffer
         };
 
-        engine->frames[i].shaderDataBuffers.deviceAddress = vkGetBufferDeviceAddress(engine->device, &uBufferBdaInfo);
+        engine->frames[i].shaderDataBuffers.deviceAddress = 
+            vkGetBufferDeviceAddress(engine->device, &uBufferBdaInfo);
     }
 
-    VkSemaphoreCreateInfo semaphoreCI{
+    // ====================== Semaphores & Fences ======================
+    VkSemaphoreCreateInfo semaphoreCI = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
     };
 
-    VkFenceCreateInfo fenceCI{
+    VkFenceCreateInfo fenceCI = {
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
         .flags = VK_FENCE_CREATE_SIGNALED_BIT
     };
 
-    //! NOTE(trist007): was doing 1 semaphore per frame but was getting VUID-vkQueueSubmit-pSignalSemaphores-00067
-    //! moving to 1 semaphore per swapchainImage
-    for (uint32_t i = 0; i < FRAME_OVERLAP; i++) {
-        VK_CHECK(vkCreateFence(engine->device, &fenceCI, NULL, &engine->frames[i].renderFence));
-        VK_CHECK(vkCreateSemaphore(engine->device, &semaphoreCI, NULL, &engine->frames[i].swapchainSemaphore));
-        VK_CHECK(vkCreateSemaphore(engine->device, &semaphoreCI, NULL, &engine->frames[i].renderSemaphore));
-    }
-
-    //! NOTE(trist007): creating 1 semaphore per swapchainImageCount
-    for(uint32_t i = 0; i < engine->swapchainImageCount; i++)
+    for (uint32_t i = 0; i < FRAME_OVERLAP; i++) 
     {
-        VK_CHECK(vkCreateSemaphore(engine->device, &semaphoreCI, NULL, &engine->renderSemaphores[i]));
+        VK_CHECK(vkCreateFence(engine->device, &fenceCI, NULL, 
+                               &engine->frames[i].renderFence));
+        VK_CHECK(vkCreateSemaphore(engine->device, &semaphoreCI, NULL, 
+                                   &engine->frames[i].swapchainSemaphore));
+        VK_CHECK(vkCreateSemaphore(engine->device, &semaphoreCI, NULL, 
+                                   &engine->frames[i].renderSemaphore));
     }
 
-    VkCommandPoolCreateInfo commandPoolCI{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+    for (uint32_t i = 0; i < engine->swapchainImageCount; i++)
+    {
+        VK_CHECK(vkCreateSemaphore(engine->device, &semaphoreCI, NULL, 
+                                   &engine->renderSemaphores[i]));
+    }
+
+    // ====================== Command Pool ======================
+    VkCommandPoolCreateInfo commandPoolCI = {
+        .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
         .queueFamilyIndex = engine->graphicsQueueFamily
     };
 
-    VK_CHECK(vkCreateCommandPool(engine->device, &commandPoolCI, NULL, &engine->commandPool));
+    VK_CHECK(vkCreateCommandPool(engine->device, &commandPoolCI, NULL, 
+                                 &engine->commandPool));
 
-    for (uint32_t i = 0; i < FRAME_OVERLAP; i++) {
-        VkCommandBufferAllocateInfo allocInfo{
+    for (uint32_t i = 0; i < FRAME_OVERLAP; i++) 
+    {
+        VkCommandBufferAllocateInfo allocInfo = {
             .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
             .commandPool        = engine->commandPool,
             .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
             .commandBufferCount = 1
         };
 
-        VK_CHECK(vkAllocateCommandBuffers(engine->device, &allocInfo, &engine->frames[i].commandBuffer));
+        VK_CHECK(vkAllocateCommandBuffers(engine->device, &allocInfo, 
+                                          &engine->frames[i].commandBuffer));
     }
 
+    SDL_Log("Per-frame uniform buffers and sync objects created");
     return true;
 }
 
@@ -1050,7 +1116,7 @@ create_main_3d_descriptor_layout_and_set(struct VulkanEngine *engine)
 
 
     // We no longer need variable descriptor count flags for binding 0 in this simple case
-    VkDescriptorSetLayoutCreateInfo descLayoutCI{
+    VkDescriptorSetLayoutCreateInfo descLayoutCI = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .bindingCount = 1,
         .pBindings = bindings
@@ -1065,7 +1131,7 @@ create_main_3d_descriptor_layout_and_set(struct VulkanEngine *engine)
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = FRAME_OVERLAP * 2;
 
-    VkDescriptorPoolCreateInfo descPoolCI{
+    VkDescriptorPoolCreateInfo descPoolCI = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .flags = 0,
         .maxSets = FRAME_OVERLAP * 4,
@@ -1079,7 +1145,7 @@ create_main_3d_descriptor_layout_and_set(struct VulkanEngine *engine)
     for(uint32_t i = 0; i < FRAME_OVERLAP; i++)
     {
         // === Allocate Descriptor Set ===
-        VkDescriptorSetAllocateInfo texDescSetAlloc{
+        VkDescriptorSetAllocateInfo texDescSetAlloc = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
             .descriptorPool = engine->descriptorPool,
             .descriptorSetCount = 1,
@@ -1092,13 +1158,13 @@ create_main_3d_descriptor_layout_and_set(struct VulkanEngine *engine)
     for(uint32_t i = 0; i < FRAME_OVERLAP; i++)
     {
         // New write for shaderData (binding 0)
-        VkDescriptorBufferInfo shaderDataBufferInfo{
+        VkDescriptorBufferInfo shaderDataBufferInfo = {
             .buffer = engine->frames[i].shaderDataBuffers.buffer,   // use one from current frame
             .offset = 0,
-            .range = sizeof(ShaderData)
+            .range = sizeof(struct ShaderData)
         };
 
-        VkWriteDescriptorSet writeShaderData{
+        VkWriteDescriptorSet writeShaderData = {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = engine->frames[i].descriptorSet,
             .dstBinding = 0,
@@ -1112,11 +1178,14 @@ create_main_3d_descriptor_layout_and_set(struct VulkanEngine *engine)
 
     // Loading shaders
     //Slang::ComPtr<slang::IGlobalSession> globalSession;
+
+
+    /*
     engine->slangGlobalSession = {};
     slang::createGlobalSession(engine->slangGlobalSession.writeRef());
     if (!engine->slangGlobalSession) {
     SDL_Log("Failed to create slangGlobalSession");
-}
+    }
 
     slang::TargetDesc target = {
         .format = SLANG_SPIRV,
@@ -1147,6 +1216,7 @@ create_main_3d_descriptor_layout_and_set(struct VulkanEngine *engine)
     Slang::ComPtr<ISlangBlob> diagnosticsBlob;
 
     SDL_Log("Compiling shader from source: shader.slang");
+    */
 
     // Read the file ourselves so it always gets the latest version
     size_t sourceSize = 0;
@@ -1157,6 +1227,7 @@ create_main_3d_descriptor_layout_and_set(struct VulkanEngine *engine)
         abort();
     }
 
+    /*
     Slang::ComPtr<slang::IModule> slangModule; 
     {
         Slang::ComPtr<ISlangBlob> diagnosticsBlob;
@@ -1186,15 +1257,18 @@ create_main_3d_descriptor_layout_and_set(struct VulkanEngine *engine)
     // Get SPIR-V
     Slang::ComPtr<ISlangBlob> spirv;
     slangModule->getTargetCode(0, spirv.writeRef());
+    */
 
     // Create Vulkan shader module (rest of your code stays the same)
-    VkShaderModuleCreateInfo shaderModuleCI{
+    VkShaderModuleCreateInfo shaderModuleCI = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = spirv->getBufferSize(),
-        .pCode = (const uint32_t*)spirv->getBufferPointer()
+        .codeSize = sourceSize,
+        .pCode = sourceData
     };
 
     VK_CHECK(vkCreateShaderModule(engine->device, &shaderModuleCI, NULL, &engine->shaderModule));
+
+    SDL_free(sourceData);
 
     SDL_Log("Vulkan shader module created successfully");
 
@@ -1204,12 +1278,12 @@ create_main_3d_descriptor_layout_and_set(struct VulkanEngine *engine)
 bool
 create_main_graphics_pipeline(struct VulkanEngine *engine)
 {
-    VkPushConstantRange pushConstantRange{
+    VkPushConstantRange pushConstantRange = {
         .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset     = 0,
         .size =       sizeof(float) * 4
     };
-    VkPipelineLayoutCreateInfo pipelineLayoutCI{
+    VkPipelineLayoutCreateInfo pipelineLayoutCI = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
         .pSetLayouts = &engine->descriptorSetLayoutTex,
@@ -1219,7 +1293,7 @@ create_main_graphics_pipeline(struct VulkanEngine *engine)
     VK_CHECK(vkCreatePipelineLayout(engine->device, &pipelineLayoutCI, NULL, &engine->pipelineLayout));
 
 
-    VkVertexInputBindingDescription vertexBinding{
+    VkVertexInputBindingDescription vertexBinding = {
         .binding = 0,
         .stride = sizeof(Vertex),
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
@@ -1231,7 +1305,7 @@ create_main_graphics_pipeline(struct VulkanEngine *engine)
         * sizeof(VkVertexInputAttributeDescription));
 
     // Location 0: Position
-    vertexAttributes[0] = VkVertexInputAttributeDescription{
+    vertexAttributes[0] = (VkVertexInputAttributeDescription){
         .location = 0,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32B32_SFLOAT,
@@ -1239,7 +1313,7 @@ create_main_graphics_pipeline(struct VulkanEngine *engine)
     };
 
     // Location 1: Normal
-    vertexAttributes[1] = VkVertexInputAttributeDescription{
+    vertexAttributes[1] = (VkVertexInputAttributeDescription){
         .location = 1,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32B32_SFLOAT,
@@ -1247,7 +1321,7 @@ create_main_graphics_pipeline(struct VulkanEngine *engine)
     };
 
     // Location 2: Texcoord
-    vertexAttributes[2] = VkVertexInputAttributeDescription{
+    vertexAttributes[2] = (VkVertexInputAttributeDescription){
         .location = 2,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32_SFLOAT,
@@ -1255,7 +1329,7 @@ create_main_graphics_pipeline(struct VulkanEngine *engine)
     };
 
     // Location 3: Color
-    vertexAttributes[3] = VkVertexInputAttributeDescription{
+    vertexAttributes[3] = (VkVertexInputAttributeDescription){
         .location = 3,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
@@ -1263,7 +1337,7 @@ create_main_graphics_pipeline(struct VulkanEngine *engine)
     };
 
     // Location 4: Joints (uint8_t[4])
-    vertexAttributes[4] = VkVertexInputAttributeDescription{
+    vertexAttributes[4] = (VkVertexInputAttributeDescription){
         .location = 4,
         .binding  = 0,
         .format   = VK_FORMAT_R8G8B8A8_UINT,
@@ -1271,14 +1345,14 @@ create_main_graphics_pipeline(struct VulkanEngine *engine)
     };
 
     // Location 5: Weights
-    vertexAttributes[5] = VkVertexInputAttributeDescription{
+    vertexAttributes[5] = (VkVertexInputAttributeDescription){
         .location = 5,
         .binding  = 0,
         .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
         .offset   = offsetof(Vertex, weights)
     };
 
-    VkPipelineVertexInputStateCreateInfo vertexInputState{
+    VkPipelineVertexInputStateCreateInfo vertexInputState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .vertexBindingDescriptionCount = 1,
         .pVertexBindingDescriptions = &vertexBinding,
@@ -1286,7 +1360,7 @@ create_main_graphics_pipeline(struct VulkanEngine *engine)
         .pVertexAttributeDescriptions = vertexAttributes,
     };
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
     };
@@ -1306,7 +1380,7 @@ create_main_graphics_pipeline(struct VulkanEngine *engine)
     };
 
     // configure viewport state
-    VkPipelineViewportStateCreateInfo viewportState{
+    VkPipelineViewportStateCreateInfo viewportState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         .viewportCount = 1,
         .scissorCount = 1
@@ -1319,48 +1393,48 @@ create_main_graphics_pipeline(struct VulkanEngine *engine)
 
     VkPipelineDynamicStateCreateInfo dynamicState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        .dynamicStateCount = ARRAYSIZE(dynamicStates),
+        .dynamicStateCount = ArraySize(dynamicStates),
         .pDynamicStates = dynamicStates
     };
 
-    VkPipelineDepthStencilStateCreateInfo depthStencilState{
+    VkPipelineDepthStencilStateCreateInfo depthStencilState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         .depthTestEnable = VK_TRUE,
         .depthWriteEnable = VK_TRUE,
         .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL
     };
 
-    VkPipelineRenderingCreateInfo renderingCI{
+    VkPipelineRenderingCreateInfo renderingCI = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .colorAttachmentCount = 1,
         .pColorAttachmentFormats = &engine->swapchainImageFormat,
         .depthAttachmentFormat = engine->depthFormat
     };
 
-    VkPipelineColorBlendAttachmentState blendAttachment{
+    VkPipelineColorBlendAttachmentState blendAttachment = {
         .colorWriteMask = 0xF
     };
-    VkPipelineColorBlendStateCreateInfo colorBlendState{
+    VkPipelineColorBlendStateCreateInfo colorBlendState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
         .attachmentCount = 1,
         .pAttachments = &blendAttachment
     };
-    VkPipelineRasterizationStateCreateInfo rasterizationState{
+    VkPipelineRasterizationStateCreateInfo rasterizationState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .polygonMode = VK_POLYGON_MODE_FILL,
         .cullMode = VK_CULL_MODE_NONE,      // ← Disable culling for testing
         .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .lineWidth = 1.0f
     };
-    VkPipelineMultisampleStateCreateInfo multisampleState{
+    VkPipelineMultisampleStateCreateInfo multisampleState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
     };
 
-    VkGraphicsPipelineCreateInfo pipelineCI{
+    VkGraphicsPipelineCreateInfo pipelineCI = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .pNext = &renderingCI,
-        .stageCount = ARRAYSIZE(shaderStages),
+        .stageCount = ArraySize(shaderStages),
         .pStages = shaderStages,
         .pVertexInputState = &vertexInputState,
         .pInputAssemblyState = &inputAssemblyState,
@@ -1429,31 +1503,30 @@ setup_font_atlas_and_text_pipeline(struct VulkanEngine *engine)
     return true;
 }
 
-void
-update_shader_data(struct VulkanEngine *engine, GameState *gameState)
+void update_shader_data(struct VulkanEngine *engine, GameState *gameState)
 {
-    FrameData &currentFrame = engine->frames[engine->frameIndex];
+    struct FrameData *currentFrame = getCurrentFrame(engine);
 
     // === Materials ===
     int numMaterials = gameState->model.mesh.materialCount;
     for (int m = 0; m < numMaterials && m < 8; ++m)
     {
-        currentFrame.shaderData.baseColorFactor[m] = 
+        currentFrame->shaderData.baseColorFactor[m] = 
             gameState->model.mesh.materials[m].baseColorFactor;
     }
 
     // === Light ===
-    currentFrame.shaderData.lightPos = HMM_V4(5.0f, 10.0f, 10.0f, 1.0f);
+    currentFrame->shaderData.lightPos = HMM_V4(5.0f, 10.0f, 10.0f, 1.0f);
 
     // === Skinning ===
     int jointCount = gameState->model.pose.jointCount;
     for (int j = 0; j < jointCount && j < 64; ++j)
     {
-        currentFrame.shaderData.skinMatrices[j] = gameState->model.pose.skinMatrices[j];
+        currentFrame->shaderData.skinMatrices[j] = gameState->model.pose.skinMatrices[j];
     }
     for (int j = jointCount; j < 64; ++j)
     {
-        currentFrame.shaderData.skinMatrices[j] = HMM_M4D(1.0f);
+        currentFrame->shaderData.skinMatrices[j] = HMM_M4D(1.0f);
     }
 
     // === Camera + Projection ===
@@ -1474,45 +1547,42 @@ update_shader_data(struct VulkanEngine *engine, GameState *gameState)
         HMM_Scale(HMM_V3(5.0f, 5.0f, 5.0f))
     );
 
-    currentFrame.shaderData.projection = proj;
-    currentFrame.shaderData.view       = view;
-    currentFrame.shaderData.model      = modelMat;
+    currentFrame->shaderData.projection = proj;
+    currentFrame->shaderData.view       = view;
+    currentFrame->shaderData.model      = modelMat;
 
-    // Send to GPU (persistent mapped buffer)
-    memcpy(currentFrame.shaderDataBuffers.allocationInfo.pMappedData,
-           &currentFrame.shaderData,
-           sizeof(ShaderData));
+    // ====================== UPLOAD TO GPU (Arena) ======================
+    // Since we use the staging arena which is persistently mapped
+    void* mapped = (char*)engine->stagingArena->mapped 
+                 + currentFrame->shaderDataBuffers.offset;
+
+    memcpy(mapped, &currentFrame->shaderData, sizeof(struct ShaderData));
 }
 
-void
-begin_frame(struct VulkanEngine *engine)
+void begin_frame(struct VulkanEngine *engine)
 {
-    FrameData &currentFrame = engine->frames[engine->frameIndex];
+    struct FrameData *currentFrame = getCurrentFrame(engine);   // ← Use pointer, not reference
 
     // =============================================
-    // 1. Destroy staging buffer from PREVIOUS frame
+    // 1. Reset per-frame text counter
     // =============================================
-    if (engine->stagingBuffer != VK_NULL_HANDLE)
-    {
-        vmaDestroyBuffer(engine->allocator, engine->stagingBuffer, engine->stagingAlloc);
-        engine->stagingBuffer = VK_NULL_HANDLE;
-        engine->stagingAlloc = VK_NULL_HANDLE;
-    }
-
     engine->textVertexCountThisFrame = 0;
+
+    // Note: We no longer destroy a per-frame staging buffer here.
+    // Our stagingArena is persistent and reused across frames.
 
     // =============================================
     // 2. Wait for GPU to finish with this frame
     // =============================================
     VK_CHECK(vkWaitForFences(engine->device, 
                              1, 
-                             &currentFrame.renderFence, 
+                             &currentFrame->renderFence, 
                              VK_TRUE, 
                              UINT64_MAX));
 
     VK_CHECK(vkResetFences(engine->device, 
                            1, 
-                           &currentFrame.renderFence));
+                           &currentFrame->renderFence));
 
     // =============================================
     // 3. Acquire next swapchain image
@@ -1521,9 +1591,9 @@ begin_frame(struct VulkanEngine *engine)
     VkResult result = vkAcquireNextImageKHR(
         engine->device,
         engine->swapchain,
-        UINT64_MAX,                    // timeout
-        currentFrame.swapchainSemaphore,
-        VK_NULL_HANDLE,                // fence
+        UINT64_MAX,
+        currentFrame->swapchainSemaphore,
+        VK_NULL_HANDLE,
         &imageIndex);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
@@ -1541,10 +1611,9 @@ begin_frame(struct VulkanEngine *engine)
     engine->imageIndex = imageIndex;
 }
 
-void
-begin_rendering(struct VulkanEngine *engine, VkCommandBuffer cmd)
+void begin_rendering(struct VulkanEngine *engine, VkCommandBuffer cmd)
 {
-    FrameData &currentFrame = engine->frames[engine->frameIndex];
+    struct FrameData *currentFrame = getCurrentFrame(engine);   // ← Fixed
 
     // === 1. Pipeline Barriers (Swapchain + Depth Image) ===
     VkImageMemoryBarrier2 outputBarriers[2] = {
@@ -1597,7 +1666,7 @@ begin_rendering(struct VulkanEngine *engine, VkCommandBuffer cmd)
         .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .clearValue = { .color = { 0.0f, 0.0f, 0.2f, 1.0f } }   // dark blue background
+        .clearValue = { .color = { 0.0f, 0.0f, 0.2f, 1.0f } }
     };
 
     VkRenderingAttachmentInfo depthAttachmentInfo = {
@@ -1647,9 +1716,9 @@ begin_rendering(struct VulkanEngine *engine, VkCommandBuffer cmd)
     vkCmdBindDescriptorSets(cmd, 
                             VK_PIPELINE_BIND_POINT_GRAPHICS,
                             engine->pipelineLayout,
-                            0,                      // first set
-                            1,                      // set count
-                            &currentFrame.descriptorSet,
+                            0,
+                            1,
+                            &currentFrame->descriptorSet,   // ← note the ->
                             0, NULL);
 }
 
@@ -1804,8 +1873,8 @@ end_rendering(struct VulkanEngine *engine, VkCommandBuffer cmd)
 void
 submit_and_present(struct VulkanEngine *engine)
 {
-    FrameData &currentFrame = engine->frames[engine->frameIndex];
-    VkCommandBuffer cmd = currentFrame.commandBuffer;
+    struct FrameData *currentFrame = getCurrentFrame(engine);
+    VkCommandBuffer cmd = currentFrame->commandBuffer;
 
     // End command buffer recording
     VK_CHECK(vkEndCommandBuffer(cmd));
@@ -1816,7 +1885,7 @@ submit_and_present(struct VulkanEngine *engine)
     VkSubmitInfo submitInfo = {
         .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .waitSemaphoreCount   = 1,
-        .pWaitSemaphores      = &currentFrame.swapchainSemaphore,
+        .pWaitSemaphores      = &currentFrame->swapchainSemaphore,
         .pWaitDstStageMask    = &waitStage,
         .commandBufferCount   = 1,
         .pCommandBuffers      = &cmd,
@@ -1824,7 +1893,7 @@ submit_and_present(struct VulkanEngine *engine)
         .pSignalSemaphores    = &engine->renderSemaphores[engine->imageIndex]
     };
 
-    VK_CHECK(vkQueueSubmit(engine->graphicsQueue, 1, &submitInfo, currentFrame.renderFence));
+    VK_CHECK(vkQueueSubmit(engine->graphicsQueue, 1, &submitInfo, currentFrame->renderFence));
 
     // Present
     VkPresentInfoKHR presentInfo = {
@@ -1850,22 +1919,22 @@ submit_and_present(struct VulkanEngine *engine)
 }
 
 void
-deletion_queue_init(DeletionQueue* queue)
+deletion_queue_init(struct DeletionQueue* queue)
 {
     queue->count = 0;
     queue->capacity = DELETION_QUEUE_INITIAL_CAPACITY;
-    queue->entries = (DeletionEntry*)malloc(sizeof(DeletionEntry) * queue->capacity);
+    queue->entries = (struct DeletionEntry*)malloc(sizeof(struct DeletionEntry) * queue->capacity);
 }
 
 void
-deletion_queue_push(DeletionQueue* queue, DeletionFunc func, void* userdata)
+deletion_queue_push(struct DeletionQueue* queue, DeletionFunc func, void* userdata)
 {
     if (queue->count >= queue->capacity)
     {
         // Grow the queue
         queue->capacity *= 2;
-        queue->entries = (DeletionEntry*)realloc(queue->entries, 
-                                                 sizeof(DeletionEntry) * queue->capacity);
+        queue->entries = (struct DeletionEntry*)realloc(queue->entries, 
+                                                 sizeof(struct DeletionEntry) * queue->capacity);
     }
 
     queue->entries[queue->count].func = func;
@@ -1874,7 +1943,7 @@ deletion_queue_push(DeletionQueue* queue, DeletionFunc func, void* userdata)
 }
 
 void
-deletion_queue_flush(DeletionQueue* queue)
+deletion_queue_flush(struct DeletionQueue* queue)
 {
     // Destroy in reverse order (LIFO) - most recent first
     for (int i = (int)queue->count - 1; i >= 0; --i)
@@ -1886,7 +1955,7 @@ deletion_queue_flush(DeletionQueue* queue)
 }
 
 void
-deletion_queue_destroy(DeletionQueue* queue)
+deletion_queue_destroy(struct DeletionQueue* queue)
 {
     if (queue->entries)
     {
@@ -1899,30 +1968,65 @@ deletion_queue_destroy(DeletionQueue* queue)
 
 void destroy_allocated_image(void* userdata)
 {
-    ImageDeletion* d = (ImageDeletion*)userdata;
-    if (d->view) vkDestroyImageView(d->device, d->view, NULL);
-    if (d->image) vmaDestroyImage(d->allocator, d->image, d->allocation);
+    struct AllocatedImageDeletion* d = (struct AllocatedImageDeletion*)userdata;
+    
+    if (d == NULL) return;
+
+    if (d->imageView != VK_NULL_HANDLE)
+    {
+        vkDestroyImageView(d->device, d->imageView, NULL);
+        d->imageView = VK_NULL_HANDLE;
+    }
+
+    if (d->image != VK_NULL_HANDLE)
+    {
+        vkDestroyImage(d->device, d->image, NULL);
+        d->image = VK_NULL_HANDLE;
+    }
+
     free(d);   // important: free the struct we allocated
 }
 
-void deletion_queue_push_allocated_image(DeletionQueue *queue,
-                                         VkDevice device,
-                                         VkImageView view,
-                                         VmaAllocator allocator,
-                                         VkImage image,
-                                         VmaAllocation allocation)
+void deletion_queue_push_image(struct DeletionQueue *queue,
+                               VkDevice device,
+                               VkImageView view,
+                               VkImage image)
 {
     if (image == VK_NULL_HANDLE)
         return;
 
-    AllocatedImageDeletion* del = (AllocatedImageDeletion*)malloc(sizeof(AllocatedImageDeletion));
-    *del = AllocatedImageDeletion{
-        .device     = device,
-        .imageView  = view,
-        .allocator  = allocator,
-        .image      = image,
-        .allocation = allocation
+    struct AllocatedImageDeletion* del = (struct AllocatedImageDeletion*)malloc(sizeof(struct AllocatedImageDeletion));
+    if (del == NULL)
+        return;
+
+    *del = (struct AllocatedImageDeletion){
+        .device    = device,
+        .imageView = view,
+        .image     = image
     };
 
     deletion_queue_push(queue, destroy_allocated_image, del);
+}
+
+void destroy_texture(struct VulkanEngine *engine, struct Texture *tex)
+{
+    if (tex == NULL) return;
+
+    if (tex->sampler != VK_NULL_HANDLE)
+    {
+        vkDestroySampler(engine->device, tex->sampler, NULL);
+        tex->sampler = VK_NULL_HANDLE;
+    }
+
+    if (tex->view != VK_NULL_HANDLE)
+    {
+        vkDestroyImageView(engine->device, tex->view, NULL);
+        tex->view = VK_NULL_HANDLE;
+    }
+
+    if (tex->image != VK_NULL_HANDLE)
+    {
+        vkDestroyImage(engine->device, tex->image, NULL);
+        tex->image = VK_NULL_HANDLE;
+    }
 }

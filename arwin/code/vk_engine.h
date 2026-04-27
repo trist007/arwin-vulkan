@@ -8,10 +8,10 @@
 #include "vk_text.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan_core.h>
-#include "tiny_obj_loader.h"
+//#include "tiny_obj_loader.h"
 
-#include "slang/slang.h"
-#include "slang/slang-com-ptr.h"
+//#include "slang/slang.h"
+//#include "slang/slang-com-ptr.h"
 
 #define FRAME_OVERLAP 2
 #define MAX_SWAPCHAIN_IMAGES 4
@@ -80,6 +80,7 @@ struct ShaderData
 struct ShaderDataBuffer
 {
     VkBuffer buffer;
+    VkDeviceSize offset;
     VkDeviceAddress deviceAddress;
 };
 
@@ -142,10 +143,10 @@ struct VulkanEngine
     VkInstance instance;
     VkDevice device;
     VkSwapchainKHR swapchain;
-    VkExtent2D swapchainExtent{};
+    VkExtent2D swapchainExtent;
     VkExtent2D windowExtent;
     SDL_Window *window;
-    VkSurfaceKHR surface{ VK_NULL_HANDLE };
+    VkSurfaceKHR surface;
     VkPhysicalDevice chosenGPU;
     uint32_t swapchainImageCount;
     VkSemaphore renderSemaphores[MAX_SWAPCHAIN_IMAGES];
@@ -194,9 +195,9 @@ struct VulkanEngine
     struct ivec2 windowSize;
 
     // slang
-    Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
-    VkShaderModule shaderModule{};
-    VkShaderModule textShaderModule{};
+    //Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
+    VkShaderModule shaderModule;
+    VkShaderModule textShaderModule;
 
     // swapchain
     VkImage swapchainImages[MAX_SWAPCHAIN_IMAGES];
@@ -224,10 +225,16 @@ struct VulkanEngine
     int pixelHeight;
     VkBuffer  stagingBuffer;
     VkBuffer  textStagingBuffer;
+    VkDeviceSize  textStagingOffset;
     int textVertexCountThisFrame;
     
-    // memory arena
+    // game memory arena
     Arena *arena;
+
+    // vk memory arena
+    struct vkArena *deviceLocalArena; // GPU
+    struct vkArena *stagingArena;     // CPU
+
 };
 
 // singleton for pointer retrieval
@@ -237,21 +244,21 @@ struct GameState;
 // init functions
 void init_vulkan(struct VulkanEngine *engine);
 void init_swapchain(struct VulkanEngine *engine);
-bool init_mezzanine(struct VulkanEngine *engine, GameState *gameState);
+bool init_mezzanine(struct VulkanEngine *engine, struct GameState *gamestate);
 
 // init_mezzanine
-bool load_and_upload_gltf_models(struct VulkanEngine *engine, GameState *gameState);
+bool load_and_upload_gltf_models(struct VulkanEngine *engine, struct GameState *gamestate);
 bool create_per_frame_uniform_buffers(struct VulkanEngine *engine);
 bool create_main_3d_descriptor_layout_and_set(struct VulkanEngine *engine);
 bool create_main_graphics_pipeline(struct VulkanEngine *engine);
 bool setup_font_atlas_and_text_pipeline(struct VulkanEngine *engine);
 
 // main render loop
-void mainRenderLoop(struct VulkanEngine *engine, GameState *gameState);
-void update_shader_data(struct VulkanEngine *engine, GameState *gameState);
+void mainRenderLoop(struct VulkanEngine *engine, struct GameState *gamestate);
+void update_shader_data(struct VulkanEngine *engine, struct GameState *gamestate);
 void begin_frame(struct VulkanEngine *engine);
 void begin_rendering(struct VulkanEngine *engine, VkCommandBuffer cmd);
-void draw_3d_scene(struct VulkanEngine *engine, GameState *gameState, VkCommandBuffer cmd);
+void draw_3d_scene(struct VulkanEngine *engine, struct GameState *gamestate, VkCommandBuffer cmd);
 void draw_ui_text(struct VulkanEngine *engine, VkCommandBuffer cmd);
 void end_rendering(struct VulkanEngine *engine, VkCommandBuffer cmd);
 void submit_and_present(struct VulkanEngine *engine);
@@ -261,19 +268,20 @@ void destroy_swapchain(struct VulkanEngine *engine);
 void draw_imgui(struct VulkanEngine *engine, VkCommandBuffer cmd, VkImageView targetImageView);
 void resize_swapchain(struct VulkanEngine *engine);
 
-void initVulkanEngine(struct VulkanEngine *engine, GameState *gameState);
+void initVulkanEngine(struct VulkanEngine *engine, struct GameState *gamestate);
 void cleanupVulkanEngine(struct VulkanEngine *engine);
 void howtoCleanupVulkanEngine(struct VulkanEngine *engine);
 
-void runVulkanEngine(struct VulkanEngine *engine, GameState *gameState);
+void runVulkanEngine(struct VulkanEngine *engine, struct GameState *gamestate);
 struct FrameData *getCurrentFrame(struct VulkanEngine *engine);
 void RenderText(struct VulkanEngine *engine, VkCommandBuffer cmd, FontAtlas *atlas,
 const char *text, float x, float y, float red, float green, float blue);
 
 // Textures
 AllocatedImage create_image(struct VulkanEngine *engine, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped);
-AllocatedImage create_image(struct VulkanEngine *engine, void *data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped);
-void destroy_image(struct VulkanEngine *engine, const AllocatedImage *img);
+//AllocatedImage create_image(struct VulkanEngine *engine, void *data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped);
+void destroy_image(struct VulkanEngine *engine, AllocatedImage *img);
+void destroy_texture(struct VulkanEngine *engine, struct Texture *tex);
 
 // DeletionQueue
 void deletion_queue_init(struct DeletionQueue *queue);
@@ -281,6 +289,6 @@ void deletion_queue_push(struct DeletionQueue *queue, DeletionFunc func, void* u
 void deletion_queue_flush(struct DeletionQueue *queue);
 void deletion_queue_destroy(struct DeletionQueue *queue);
 void destroy_allocated_image(void* userdata);
-void deletion_queue_push_allocated_image(struct DeletionQueue *queue, VkDevice device, VkImageView view, VkImage image);
+void deletion_queue_push_image(struct DeletionQueue *queue, VkDevice device, VkImageView view, VkImage image);
 
 #endif

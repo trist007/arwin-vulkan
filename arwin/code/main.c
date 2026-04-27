@@ -1,31 +1,26 @@
 #include "vk_engine.h"
 
-int arwin(int argc,  char *argv[])
+int main(int argc,  char *argv[])
 {
     // Game Storage
     static uint8_t gameStorage[16 * 1024 * 1024];
     Arena gameArena; 
     arenaInit(&gameArena, gameStorage, sizeof(gameStorage));
 
-    // Engine Storage
-    static uint8_t engineStorage[16 * 1024 * 1024];
-    Arena engineArena;
-    arenaInit(&engineArena, engineStorage, sizeof(engineStorage));
+    GameState gamestate = {0};
 
-    GameState gameState = {};
-
-    gameState.arena = &gameArena;
+    gamestate.arena = &gameArena;
 
     // initializes everything to 0
-    struct VulkanEngine engine = {};
+    struct VulkanEngine engine = {0};
 
-    engine.arena = &engineArena;
+    initVulkanEngine(&engine, &gamestate);
 
-    initVulkanEngine(&engine, &gameState);
-
-    runVulkanEngine(&engine, &gameState);
+    runVulkanEngine(&engine, &gamestate);
 
     howtoCleanupVulkanEngine(&engine);
 
     //cleanupVulkanEngine(&engine);
+
+    return 0;
 }

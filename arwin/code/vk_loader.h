@@ -150,25 +150,22 @@ typedef struct Model
 
     // GPU side - Vulkan
     VkBuffer          vertexBuffer;
-    VmaAllocation     vertexBufferAllocation;
     VkDeviceSize      vertexBufferSize;
-    VkDeviceSize      indexBufferOffset;
+    VkDeviceSize      vertexBufferOffset;
 
     VkBuffer          indexBuffer;
-    VmaAllocation     indexBufferAlloc;
     VkDeviceSize      indexBufferSize;
+    VkDeviceSize      indexBufferOffset;
 
     uint32_t          indexCount;
     VkIndexType       indexType;
 
     // Skinning buffer (SSBO recommended)
     VkBuffer          skinningBuffer;
-    VmaAllocation     skinningBufferAlloc;
     void*             skinningMapped;
 
     // Per-model uniform buffer (model matrix, etc.)
     VkBuffer          uniformBuffer;
-    VmaAllocation     uniformBufferAlloc;
     void*             uniformMapped;
 
     // glTF textures

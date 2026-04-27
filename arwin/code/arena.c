@@ -1,4 +1,5 @@
 #include "arena.h"
+#include <stdbool.h>
 
 //#################################################################################
 // Game Arena
@@ -27,7 +28,7 @@ arenaAlloc(Arena *a, size_t s)
 // Vk Arena
 //#################################################################################
 
-VkResult createVkArena(VkDevice device, uint32_t memoryTypeIndex, VkDeviceSize size, struct vkArena *arena)
+VkResult createVkArena(VkPhysicalDevice chosenGPU, VkDevice device, uint32_t memoryTypeIndex, VkDeviceSize size, struct vkArena *arena)
 {
 
     arena->memory = VK_NULL_HANDLE;
@@ -43,15 +44,28 @@ VkResult createVkArena(VkDevice device, uint32_t memoryTypeIndex, VkDeviceSize s
         memoryTypeIndex
     };
 
-    VkResult res = vkAllocateMemory(device, &allocInfo, NULL, arena->memory);
-    if (res != VK_SUCCESS) return res;
-
-    // Optional: persistent map for host-visible arenas
-    VkMemoryPropertyFlags props = /* query from physical device */;
-    if (props & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+    VkResult res = vkAllocateMemory(device, &allocInfo, NULL, &arena->memory);
+    if (res != VK_SUCCESS)
     {
-        vkMapMemory(device, arena->memory, 0, VK_WHOLE_SIZE, 0, arena->mapped);
+        SDL_Log("vkAllocateMemory failed with code %d", res);
+        return res;
     }
+
+    // 2. Persistent map only if this memory type is host visible
+    VkPhysicalDeviceMemoryProperties props;
+    vkGetPhysicalDeviceMemoryProperties(chosenGPU, &props);
+
+    VkMemoryPropertyFlags flags = props.memoryTypes[memoryTypeIndex].propertyFlags;
+
+    if (flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+    {
+        res = vkMapMemory(device, arena->memory, 0, VK_WHOLE_SIZE, 0, &arena->mapped);
+        if (res != VK_SUCCESS) {
+            SDL_Log("Warning: Could not map host-visible arena");
+            // We can continue even if mapping fails (some drivers are picky)
+        }
+    }
+
     return VK_SUCCESS;
 }
 
@@ -79,7 +93,7 @@ Allocation arena_alloc(struct vkArena *arena, VkDeviceSize size, VkDeviceSize al
     return alloc;
 }
 
-static inline bool allocation_valid(Allocation a)
+bool allocation_valid(Allocation a)
 {
     return a.memory != VK_NULL_HANDLE && a.size > 0;
 }

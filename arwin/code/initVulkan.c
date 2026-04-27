@@ -393,7 +393,46 @@ evalDevice(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevice device, s
         SDL_Log("Failed to enumerate device extensions: %d\n", result); 
     }
 
-    //! get VkPhysicalDeviceMemoryProperties 
+    VkPhysicalDeviceMemoryProperties memoryProps = {0};
+
+    vkGetPhysicalDeviceMemoryProperties(device, &memoryProps); 
+
+    memcpy(&deviceInfo->memoryProperties, &memoryProps, sizeof(VkPhysicalDeviceMemoryProperties));
+
 
     return(score);
+}
+
+uint32_t find_memory_type(VkPhysicalDevice physicalDevice,
+                          uint32_t memoryTypeBits,
+                          VkMemoryPropertyFlags requiredFlags,
+                          VkMemoryPropertyFlags preferredFlags)
+{
+    VkPhysicalDeviceMemoryProperties memProps;
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
+
+    // First try: required + preferred
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i)
+    {
+        if ((memoryTypeBits & (1u << i)) &&
+            (memProps.memoryTypes[i].propertyFlags & requiredFlags) == requiredFlags &&
+            (memProps.memoryTypes[i].propertyFlags & preferredFlags) == preferredFlags)
+        {
+            return i;
+        }
+    }
+
+    // Second try: just required flags
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i)
+    {
+        if ((memoryTypeBits & (1u << i)) &&
+            (memProps.memoryTypes[i].propertyFlags & requiredFlags) == requiredFlags)
+        {
+            SDL_Log("Using fallback memory type %u", i);
+            return i;
+        }
+    }
+
+    SDL_Log("ERROR: Could not find suitable memory type!");
+    return ~0u;
 }

@@ -1,3 +1,3 @@
 @echo off
 cd build
-main.exe
+arwin.exe
