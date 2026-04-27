@@ -16,11 +16,26 @@ arenaInit(Arena *a, void *buf, size_t size)
 void *
 arenaAlloc(Arena *a, size_t s)
 {
-    if(a->offset + s > a->size)
+    if (s == 0)
         return NULL;
-    void *ptr = a->base + a->offset;
-    a->offset += s;
-    
+
+    // 16-byte alignment (required for HMM_Quat, HMM_Mat4, etc.)
+    const size_t alignment = 16;
+
+    size_t aligned_offset = (a->offset + alignment - 1) & ~(alignment - 1);
+
+    if (aligned_offset + s > a->size)
+    {
+        SDL_Log("Arena overflow! Requested %zu bytes, only %zu left", s, a->size - a->offset);
+        return NULL;
+    }
+
+    void *ptr = a->base + aligned_offset;
+    a->offset = aligned_offset + s;
+
+    // Optional: zero the memory for safety during development
+    // memset(ptr, 0, s);
+
     return ptr;
 }
 
@@ -30,10 +45,7 @@ arenaAlloc(Arena *a, size_t s)
 
 VkResult createVkArena(VkPhysicalDevice chosenGPU, VkDevice device, uint32_t memoryTypeIndex, VkDeviceSize size, struct vkArena *arena)
 {
-
-    arena->memory = VK_NULL_HANDLE;
-    arena->mapped = NULL;
-    arena->offset = 0;
+    *arena = (struct vkArena){0};           // zero everything
     arena->size = size;
     arena->memoryTypeIndex = memoryTypeIndex;
 
